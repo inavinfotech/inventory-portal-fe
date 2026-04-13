@@ -1,55 +1,75 @@
-import React, { useState } from 'react';
-import Sidebar from '../components/Sidebar';
-import { Menu, X } from 'lucide-react';
+import React, { useState } from "react";
+import Sidebar from "../components/Sidebar";
+import { Menu, X, Bell, User, Layers, LogOut } from "lucide-react";
+import { Outlet, useNavigate } from "react-router-dom";
 
-const MainLayout = ({ children }) => {
+const MainLayout = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const navigate = useNavigate();
 
   return (
-    <div className="flex h-screen bg-gray-50 font-sans antialiased">
+    <div className="flex h-screen bg-gray-50 font-sans antialiased overflow-hidden">
       {/* Mobile Backdrop */}
       {isSidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 z-40 bg-gray-900/50 lg:hidden"
           onClick={() => setIsSidebarOpen(false)}
         />
       )}
 
       {/* Sidebar */}
-      <div className={`
+      <aside
+        className={`
         fixed inset-y-0 left-0 z-50 w-64 transform transition-transform duration-300 lg:relative lg:translate-x-0
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
+        ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"}
+      `}
+      >
         <Sidebar onClose={() => setIsSidebarOpen(false)} />
-      </div>
+      </aside>
 
       {/* Main Content */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
-        <header className="flex h-16 items-center justify-between border-b bg-white px-4 lg:px-8">
-          <button 
-            className="rounded-md p-2 text-gray-600 hover:bg-gray-100 lg:hidden"
-            onClick={() => setIsSidebarOpen(true)}
-          >
-            <Menu className="h-6 w-6" />
-          </button>
-          
+        <header className="h-16 border-b border-gray-200 bg-white flex items-center justify-between px-4 lg:px-8 z-10 shadow-sm">
           <div className="flex items-center gap-4">
-             <h2 className="text-xl font-semibold text-gray-800">Inventory Management</h2>
+            <button
+              className="rounded-lg p-2 text-gray-400 hover:bg-gray-100 lg:hidden transition-colors"
+              onClick={() => setIsSidebarOpen(true)}
+            >
+              <Menu className="h-6 w-6" />
+            </button>
+            <h2 className="text-xl font-bold text-gray-800 tracking-tight">
+              Inventory Management System
+            </h2>
           </div>
 
-          <div className="flex items-center gap-4">
-            <div className="h-8 w-8 rounded-full bg-primary-600 flex items-center justify-center text-white font-medium">
-              A
+          <div className="flex items-center gap-4 lg:gap-6">
+            <button className="relative p-2 text-gray-400 hover:text-gray-600 transition-colors hidden sm:block">
+              <Bell className="w-5 h-5" />
+              <span className="absolute top-2 right-2 w-2 h-2 bg-rose-500 rounded-full border-2 border-white"></span>
+            </button>
+            <div className="h-6 w-px bg-gray-200 hidden sm:block"></div>
+            <div className="flex items-center gap-3">
+              <div className="text-right hidden sm:block">
+                <p className="text-sm font-bold text-gray-900 leading-none">
+                  Admin
+                </p>
+                <p className="text-[10px] text-gray-500 mt-1 font-bold uppercase tracking-wider">
+                  Inventory Manager
+                </p>
+              </div>
+              <div className="w-9 h-9 bg-primary-50 rounded-full flex items-center justify-center border border-primary-100 ring-2 ring-gray-50">
+                <User className="w-5 h-5 text-primary-600" />
+              </div>
             </div>
           </div>
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar">
-          {children}
-        </main>
-      </div>
+        <div className="flex-1 overflow-y-auto p-4 lg:p-8 custom-scrollbar bg-gray-50/50">
+          <Outlet />
+        </div>
+      </main>
     </div>
   );
 };

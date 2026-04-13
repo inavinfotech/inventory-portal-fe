@@ -1,34 +1,45 @@
-import React from 'react';
-import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Package, 
-  RefreshCcw, 
-  CalendarClock, 
+import React from "react";
+import { NavLink } from "react-router-dom";
+import {
+  LayoutDashboard,
+  Package,
+  RefreshCcw,
+  CalendarClock,
   Settings,
   X,
-  Warehouse
-} from 'lucide-react';
+  Warehouse,
+  Layers,
+  LogOut,
+} from "lucide-react";
 
 const Sidebar = ({ onClose }) => {
   const navItems = [
-    { name: 'Dashboard', icon: LayoutDashboard, path: '/' },
-    { name: 'Inventory', icon: Package, path: '/inventory' },
-    { name: 'Movements', icon: RefreshCcw, path: '/movements' },
-    { name: 'Reservations', icon: CalendarClock, path: '/reservations' },
-    { name: 'Settings', icon: Settings, path: '/settings' },
+    { name: "Dashboard", icon: LayoutDashboard, path: "/" },
+    { name: "Inventory", icon: Package, path: "/inventory" },
+    { name: "Movements", icon: RefreshCcw, path: "/movements" },
+    { name: "Reservations", icon: CalendarClock, path: "/reservations" },
+    { name: "Settings", icon: Settings, path: "/settings" },
   ];
 
   return (
-    <aside className="flex h-full w-full flex-col bg-sidebar text-gray-300">
+    <aside className="flex h-full w-full flex-col bg-sidebar text-gray-300 shadow-2xl">
       {/* Brand */}
-      <div className="flex h-16 items-center justify-between px-6 border-b border-gray-800">
+      <div className="p-6 flex items-center justify-between border-b border-gray-800/50">
         <div className="flex items-center gap-3">
-          <Warehouse className="h-8 w-8 text-primary-500" />
-          <span className="text-xl font-bold text-white tracking-tight">INV PORTAL</span>
+          <div className="w-10 h-10 bg-primary-600 rounded-lg flex items-center justify-center shadow-lg transform rotate-3 hover:rotate-0 transition-transform duration-300">
+            <Layers className="text-white" size={24} />
+          </div>
+          <div>
+            <h1 className="font-bold text-lg text-white leading-tight tracking-tight uppercase">
+              INV Portal
+            </h1>
+            <p className="text-[10px] text-primary-400 font-semibold tracking-widest uppercase opacity-75">
+              Inventory MS
+            </p>
+          </div>
         </div>
-        <button 
-          className="rounded-md p-1 hover:bg-gray-800 lg:hidden"
+        <button
+          className="rounded-md p-1 hover:bg-gray-800 lg:hidden text-gray-400"
           onClick={onClose}
         >
           <X className="h-6 w-6" />
@@ -36,36 +47,39 @@ const Sidebar = ({ onClose }) => {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1 px-3 py-4 overflow-y-auto custom-scrollbar">
+      <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto custom-scrollbar">
         {navItems.map((item) => (
           <NavLink
             key={item.name}
             to={item.path}
             onClick={onClose}
             className={({ isActive }) => `
-              flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200
-              ${isActive 
-                ? 'bg-sidebar-active text-white' 
-                : 'hover:bg-sidebar-hover hover:text-white'}
+              flex items-center gap-3 rounded-xl px-4 py-2.5 text-sm font-medium transition-all duration-300 group
+              ${
+                isActive
+                  ? "bg-sidebar-active text-white shadow-lg shadow-primary-600/20 translate-x-1"
+                  : "text-gray-400 hover:bg-sidebar-hover hover:text-white"
+              }
             `}
           >
-            <item.icon className="h-5 w-5" />
-            {item.name}
+            {({ isActive }) => (
+              <>
+                <item.icon
+                  className={`h-5 w-5 transition-transform duration-300 ${isActive ? "scale-110" : "group-hover:scale-110"}`}
+                />
+                {item.name}
+              </>
+            )}
           </NavLink>
         ))}
       </nav>
 
       {/* Footer / User Profile snippet */}
-      <div className="border-t border-gray-800 p-4">
-        <div className="flex items-center gap-3 px-2">
-          <div className="h-10 w-10 rounded-full bg-gray-700 flex items-center justify-center">
-            <Warehouse className="h-5 w-5" />
-          </div>
-          <div className="flex flex-col">
-            <span className="text-sm font-medium text-white">Main Warehouse</span>
-            <span className="text-xs text-gray-500">Standalone Mode</span>
-          </div>
-        </div>
+      <div className="border-t border-gray-800/50 p-4 bg-gray-900/20">
+        <button className="flex items-center gap-3 px-4 py-2.5 w-full rounded-xl text-gray-400 hover:bg-rose-500/10 hover:text-rose-400 transition-all duration-300 group text-sm font-medium">
+          <LogOut className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+          <span>Sign Out</span>
+        </button>
       </div>
     </aside>
   );
