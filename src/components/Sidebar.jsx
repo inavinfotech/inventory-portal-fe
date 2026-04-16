@@ -14,7 +14,7 @@ import {
 
 const Sidebar = ({ onClose }) => {
   const navItems = [
-    { name: "Dashboard", icon: LayoutDashboard, path: "/" },
+    { name: "Dashboard", icon: LayoutDashboard, path: "/dashboard" },
     { name: "Inventory", icon: Package, path: "/inventory" },
     { name: "Movements", icon: RefreshCcw, path: "/movements" },
     { name: "Reservations", icon: CalendarClock, path: "/reservations" },
