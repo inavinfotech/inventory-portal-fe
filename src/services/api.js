@@ -21,8 +21,9 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.status === 401) {
       localStorage.removeItem("adminToken");
-      if (window.location.pathname !== "/users/login") {
-        window.location.href = "/users/login";
+      // The basename is /inventory, so the login page is at /inventory/login
+      if (!window.location.pathname.endsWith("/login")) {
+        window.location.href = "/inventory/login";
       }
     }
     return Promise.reject(error);
