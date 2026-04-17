@@ -15,6 +15,20 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+// Handle unauthorized responses by redirecting to login
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem("adminToken");
+      if (window.location.pathname !== "/login") {
+        window.location.href = "/login";
+      }
+    }
+    return Promise.reject(error);
+  },
+);
+
 export const inventoryService = {
   getProducts: (limit = 10, offset = 0) =>
     api.get(`/products/?limit=${limit}&offset=${offset}`),
