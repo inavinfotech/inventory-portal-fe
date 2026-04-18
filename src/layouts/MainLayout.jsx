@@ -62,20 +62,6 @@ const MainLayout = () => {
                 <User className="w-5 h-5 text-blue-600" />
               </div>
             </div>
-
-            <button
-              onClick={() => {
-                localStorage.removeItem("adminToken");
-                navigate("/login");
-              }}
-              className="p-2 text-gray-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all flex items-center gap-2 group"
-              title="Logout"
-            >
-              <LogOut className="w-5 h-5 group-hover:scale-110 transition-transform" />
-              <span className="text-sm font-medium hidden md:block">
-                Logout
-              </span>
-            </button>
           </div>
         </header>
 

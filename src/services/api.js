@@ -42,6 +42,10 @@ export const inventoryService = {
   getLowStock: () => api.get("/inventory/low-stock"),
   getMovements: (params) => api.get("/inventory/movements/", { params }),
   addProduct: (data) => api.post("/products/", data),
+  updateProduct: (id, data) => api.put(`/products/${id}`, data),
+  updateStock: (id, amount) =>
+    api.post(`/inventory/adjust`, { product_id: id, quantity: amount }),
+  addMovement: (data) => api.post("/movements/", data),
   uploadImages: (files) => {
     const formData = new FormData();
     files.forEach((file) => formData.append("files", file));

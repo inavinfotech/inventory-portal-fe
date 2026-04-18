@@ -63,7 +63,7 @@ const SettingsPage = () => {
   };
 
   return (
-    <div className="max-w-4xl space-y-8 animate-in slide-in-from-top-1 duration-700">
+    <div className="space-y-8 animate-in slide-in-from-top-1 duration-700">
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-2xl font-black text-gray-900 tracking-tight flex items-center gap-2">
