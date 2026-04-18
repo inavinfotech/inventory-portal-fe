@@ -42,6 +42,15 @@ export const inventoryService = {
   getLowStock: () => api.get("/inventory/low-stock"),
   getMovements: (params) => api.get("/inventory/movements/", { params }),
   addProduct: (data) => api.post("/products/", data),
+  uploadImages: (files) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+    return api.post("/products/upload-images", formData, {
+      headers: {
+        "Content-Type": "multipart/form-data",
+      },
+    });
+  },
 };
 
 export const reservationService = {

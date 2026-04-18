@@ -9,6 +9,8 @@ import {
   Loader2,
   AlertTriangle,
   X,
+  Upload,
+  Image as ImageIcon,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
 
@@ -24,6 +26,8 @@ const Inventory = () => {
     price: 0,
     description: "",
   });
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
 
   useEffect(() => {
     fetchInventory();
@@ -58,14 +62,29 @@ const Inventory = () => {
 
   const handleAddProduct = async () => {
     try {
-      await inventoryService.addProduct(newProduct);
+      setIsUploading(true);
+      let imageUrls = [];
+
+      if (selectedFiles.length > 0) {
+        const uploadRes = await inventoryService.uploadImages(selectedFiles);
+        imageUrls = uploadRes.data;
+      }
+
+      await inventoryService.addProduct({
+        ...newProduct,
+        images: imageUrls,
+      });
+
       setShowAddModal(false);
       setNewProduct({ name: "", sku: "", price: 0, description: "" });
+      setSelectedFiles([]);
       fetchInventory();
     } catch (err) {
       alert(
         "Failed to add product: " + (err.response?.data?.detail || err.message),
       );
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -178,8 +197,16 @@ const Inventory = () => {
                     >
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center group-hover:bg-white transition-colors">
-                            <Warehouse className="h-5 w-5 text-gray-400" />
+                          <div className="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center group-hover:bg-white transition-colors overflow-hidden">
+                            {product.images?.[0] ? (
+                              <img
+                                src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${product.images[0]}`}
+                                className="w-full h-full object-cover"
+                                alt={product.name}
+                              />
+                            ) : (
+                              <Warehouse className="h-5 w-5 text-gray-400" />
+                            )}
                           </div>
                           <div className="flex flex-col">
                             <span className="font-bold text-gray-900">
@@ -326,6 +353,56 @@ const Inventory = () => {
                   }
                 />
               </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
+                  Product Images (Max 4)
+                </label>
+                <div className="grid grid-cols-4 gap-2">
+                  {selectedFiles.map((file, idx) => (
+                    <div
+                      key={idx}
+                      className="relative aspect-square rounded-xl bg-gray-100 overflow-hidden group"
+                    >
+                      <img
+                        src={URL.createObjectURL(file)}
+                        className="w-full h-full object-cover"
+                        alt="preview"
+                      />
+                      <button
+                        onClick={() =>
+                          setSelectedFiles(
+                            selectedFiles.filter((_, i) => i !== idx),
+                          )
+                        }
+                        className="absolute top-1 right-1 p-1 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                  {selectedFiles.length < 4 && (
+                    <label className="aspect-square rounded-xl bg-gray-50 border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
+                      <Upload className="h-5 w-5 text-gray-400" />
+                      <span className="text-[10px] font-bold text-gray-400 mt-1">
+                        Add
+                      </span>
+                      <input
+                        type="file"
+                        className="hidden"
+                        multiple
+                        accept="image/*"
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files);
+                          setSelectedFiles((prev) =>
+                            [...prev, ...files].slice(0, 4),
+                          );
+                        }}
+                      />
+                    </label>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="flex gap-3 mt-10">
@@ -337,9 +414,16 @@ const Inventory = () => {
               </button>
               <button
                 onClick={handleAddProduct}
-                className="flex-1 py-4 bg-gray-900 text-white rounded-2xl font-black shadow-xl shadow-gray-900/10 hover:bg-black transition-all active:scale-95"
+                disabled={isUploading}
+                className="flex-1 py-4 bg-gray-900 text-white rounded-2xl font-black shadow-xl shadow-gray-900/10 hover:bg-black transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
               >
-                Secure Listing
+                {isUploading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" /> Processing...
+                  </>
+                ) : (
+                  "Secure Listing"
+                )}
               </button>
             </div>
           </div>
