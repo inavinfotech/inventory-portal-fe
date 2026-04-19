@@ -38,10 +38,10 @@ const Sidebar = ({ onClose }) => {
           </div>
           <div>
             <h1 className="font-bold text-lg text-white leading-tight tracking-tight uppercase">
-              INV Portal
+              CENTRAL INV
             </h1>
             <p className="text-[10px] text-primary-400 font-semibold tracking-widest uppercase opacity-75">
-              Inventory MS
+              PORTAL
             </p>
           </div>
         </div>
