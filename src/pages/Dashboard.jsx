@@ -122,15 +122,52 @@ const Dashboard = () => {
               <ArrowRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
             </Link>
           </div>
-          <div className="flex-1 flex items-center justify-center p-8">
-            <div className="text-center">
-              <div className="mx-auto w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
-                <Package className="h-8 w-8 text-gray-300" />
+          <div className="flex-1 p-8 pt-0">
+            {stats?.stock_distribution?.length > 0 ? (
+              <div className="space-y-6">
+                {stats.stock_distribution.map((item, idx) => {
+                  const maxQty = Math.max(
+                    ...stats.stock_distribution.map((d) => d.quantity),
+                  );
+                  const percentage = (item.quantity / maxQty) * 100;
+
+                  return (
+                    <div key={idx} className="group/item">
+                      <div className="flex justify-between items-end mb-2">
+                        <span className="text-xs font-bold text-gray-700 truncate max-w-[70%] group-hover/item:text-primary-600 transition-colors">
+                          {item.name}
+                        </span>
+                        <span className="text-[10px] font-black text-gray-400 tabular-nums">
+                          {item.quantity.toLocaleString()} UNITS
+                        </span>
+                      </div>
+                      <div className="h-2 w-full bg-gray-50 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary-500 rounded-full transition-all duration-1000 ease-out"
+                          style={{
+                            width: `${percentage}%`,
+                            opacity: 0.7 + percentage / 300,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="pt-4 border-t border-gray-50 flex items-center justify-between text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+                  <span>Top Inventory Assets</span>
+                  <span className="text-gray-300">Live Sync</span>
+                </div>
               </div>
-              <p className="text-gray-400 italic text-sm">
-                Visualizing Stock Levels...
-              </p>
-            </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center">
+                <div className="mx-auto w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mb-4">
+                  <Package className="h-8 w-8 text-gray-300" />
+                </div>
+                <p className="text-gray-400 italic text-sm">
+                  No stock data available yet.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 

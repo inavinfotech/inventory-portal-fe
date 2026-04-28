@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Plus,
   Search,
@@ -17,15 +18,16 @@ import {
 import { inventoryService } from "../services/api";
 
 const Inventory = () => {
+  const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedVariant, setSelectedVariant] = useState(null);
   const [editProduct, setEditProduct] = useState(null);
   const [adjustmentAmount, setAdjustmentAmount] = useState("");
   const [newProduct, setNewProduct] = useState({
@@ -33,9 +35,11 @@ const Inventory = () => {
     sku: "",
     price: "",
     description: "",
+    variants: [],
   });
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [expandedProduct, setExpandedProduct] = useState(null);
 
   useEffect(() => {
     fetchInventory();
@@ -45,32 +49,13 @@ const Inventory = () => {
     try {
       setLoading(true);
       const response = await inventoryService.getProducts();
-      const items = response.data.items || [];
-
-      // Fetch stock for each product
-      const productsWithStock = await Promise.all(
-        items.map(async (p) => {
-          try {
-            const stockRes = await inventoryService.getProductStock(p.id);
-            return { ...p, stock: stockRes.data.quantity };
-          } catch (e) {
-            return { ...p, stock: 0 };
-          }
-        }),
-      );
-
-      setProducts(productsWithStock);
+      setProducts(response.data.items || []);
       setError(null);
     } catch (err) {
       setError("Failed to fetch inventory. Please try again later.");
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleShowDetails = (product) => {
-    setSelectedProduct(product);
-    setShowDetailsModal(true);
   };
 
   const handleShowEdit = (product) => {
@@ -93,23 +78,29 @@ const Inventory = () => {
     }
 
     try {
-      await inventoryService.updateStock(selectedProduct.id, amount);
-      if (amount > 0) {
-        await inventoryService.addMovement({
-          product_id: selectedProduct.id,
-          type: "IN",
-          quantity: amount,
-          reference_id: "manual_adjustment",
-        });
-      } else {
-        await inventoryService.addMovement({
-          product_id: selectedProduct.id,
-          type: "OUT",
-          quantity: Math.abs(amount),
-          reference_id: "manual_adjustment",
-        });
-      }
+      await inventoryService.updateStock(
+        selectedProduct.id,
+        amount,
+        selectedVariant?.id,
+      );
+
+      await inventoryService.addMovement({
+        product_id: selectedProduct.id,
+        variant_id: selectedVariant?.id,
+        type:
+          amount >
+          (selectedVariant ? selectedVariant.stock : selectedProduct.stock)
+            ? "IN"
+            : "OUT",
+        quantity: Math.abs(
+          amount -
+            (selectedVariant ? selectedVariant.stock : selectedProduct.stock),
+        ),
+        reference_id: "manual_adjustment",
+      });
+
       setShowAdjustmentModal(false);
+      setSelectedVariant(null);
       fetchInventory();
     } catch (err) {
       alert(
@@ -143,10 +134,20 @@ const Inventory = () => {
         ...newProduct,
         price: parseFloat(newProduct.price),
         images: imageUrls,
+        variants: newProduct.variants.map((v) => ({
+          ...v,
+          price: parseFloat(v.price),
+        })),
       });
 
       setShowAddModal(false);
-      setNewProduct({ name: "", sku: "", price: "", description: "" });
+      setNewProduct({
+        name: "",
+        sku: "",
+        price: "",
+        description: "",
+        variants: [],
+      });
       setSelectedFiles([]);
       fetchInventory();
     } catch (err) {
@@ -183,6 +184,12 @@ const Inventory = () => {
         ...updateData,
         price: parseFloat(updateData.price),
         images: imageUrls,
+        variants: updateData.variants?.map((v) => ({
+          id: v.id,
+          sku: v.sku,
+          weight: v.weight,
+          price: parseFloat(v.price),
+        })),
       });
 
       setShowEditModal(false);
@@ -218,6 +225,37 @@ const Inventory = () => {
         "Stock update failed: " + (err.response?.data?.detail || err.message),
       );
     }
+  };
+
+  const handleVariantStockUpdate = async (productId, variantId, amount) => {
+    try {
+      if (amount > 0) {
+        await inventoryService.addStock({
+          product_id: productId,
+          variant_id: variantId,
+          quantity: amount,
+        });
+      } else {
+        await inventoryService.removeStock({
+          product_id: productId,
+          variant_id: variantId,
+          quantity: Math.abs(amount),
+        });
+      }
+      fetchInventory();
+    } catch (err) {
+      alert(
+        "Variant stock update failed: " +
+          (err.response?.data?.detail || err.message),
+      );
+    }
+  };
+
+  const handleShowVariantAdjustment = (product, variant) => {
+    setSelectedProduct(product);
+    setSelectedVariant(variant);
+    setAdjustmentAmount(variant.stock.toString());
+    setShowAdjustmentModal(true);
   };
 
   if (loading)
@@ -302,102 +340,224 @@ const Inventory = () => {
                       p.sku.toLowerCase().includes(searchTerm.toLowerCase()),
                   )
                   .map((product) => (
-                    <tr
-                      key={product.id}
-                      className="group hover:bg-gray-50/50 transition-colors"
-                    >
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-4">
-                          <div className="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center group-hover:bg-white transition-colors overflow-hidden">
-                            {product.images?.[0] ? (
-                              <img
-                                src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${product.images[0]}`}
-                                className="w-full h-full object-cover"
-                                alt={product.name}
-                              />
-                            ) : (
-                              <Warehouse className="h-5 w-5 text-gray-400" />
+                    <React.Fragment key={product.id}>
+                      <tr className="group hover:bg-gray-50/50 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-4">
+                            <div className="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center group-hover:bg-white transition-colors overflow-hidden">
+                              {product.images?.[0] ? (
+                                <img
+                                  src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${product.images[0]}`}
+                                  className="w-full h-full object-cover"
+                                  alt={product.name}
+                                />
+                              ) : (
+                                <Warehouse className="h-5 w-5 text-gray-400" />
+                              )}
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-gray-900">
+                                {product.name}
+                              </span>
+                              <span className="text-[10px] font-mono text-gray-400 uppercase tracking-tighter">
+                                {product.sku}{" "}
+                                {product.variants?.length > 0 && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setExpandedProduct(
+                                        expandedProduct === product.id
+                                          ? null
+                                          : product.id,
+                                      );
+                                    }}
+                                    className="ml-2 text-primary-600 hover:underline font-bold"
+                                  >
+                                    * {product.variants.length} Weights{" "}
+                                    {expandedProduct === product.id
+                                      ? "Up"
+                                      : "Down"}
+                                  </button>
+                                )}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className="font-black text-gray-900">
+                            {product.variants?.length > 0
+                              ? `$${Math.min(...product.variants.map((v) => v.price)).toFixed(2)} - $${Math.max(...product.variants.map((v) => v.price)).toFixed(2)}`
+                              : `$${product.price?.toFixed(2)}`}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-3">
+                            <div className="flex flex-col">
+                              <span
+                                className={`text-sm font-black ${product.stock < 10 ? "text-rose-600" : "text-gray-900"}`}
+                              >
+                                {product.stock} units
+                              </span>
+                              <div className="mt-1.5 h-1.5 w-24 overflow-hidden rounded-full bg-gray-100">
+                                <div
+                                  className={`h-full rounded-full transition-all duration-1000 ${product.stock < 10 ? "bg-rose-500" : "bg-emerald-500"}`}
+                                  style={{
+                                    width: `${Math.min(product.stock * 2, 100)}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            {product.stock < 10 && (
+                              <div className="animate-pulse flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700">
+                                <AlertTriangle className="h-3 w-3" /> CRITICAL
+                              </div>
                             )}
                           </div>
-                          <div className="flex flex-col">
-                            <span className="font-bold text-gray-900">
-                              {product.name}
-                            </span>
-                            <span className="text-[10px] font-mono text-gray-400 uppercase tracking-tighter">
-                              {product.sku}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className="font-black text-gray-900">
-                          ${product.price?.toFixed(2)}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="flex flex-col">
-                            <span
-                              className={`text-sm font-black ${product.stock < 10 ? "text-rose-600" : "text-gray-900"}`}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end gap-2 opacity-40 group-hover:opacity-100 transition-opacity">
+                            {(!product.variants ||
+                              product.variants.length === 0) && (
+                              <>
+                                <button
+                                  onClick={() =>
+                                    handleStockUpdate(product.id, 10)
+                                  }
+                                  className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-100"
+                                  title="Add 10 units"
+                                >
+                                  <TrendingUp className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    handleStockUpdate(product.id, -10)
+                                  }
+                                  className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-rose-100"
+                                  title="Remove 10 units"
+                                >
+                                  <TrendingDown className="h-4 w-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleShowAdjustment(product)}
+                                  className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors border border-primary-100"
+                                  title="Manual Adjustment"
+                                >
+                                  <Settings2 className="h-4 w-4" />
+                                </button>
+                              </>
+                            )}
+                            <button
+                              onClick={() => handleShowEdit(product)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-blue-100"
+                              title="Edit Product"
                             >
-                              {product.stock} units
-                            </span>
-                            <div className="mt-1.5 h-1.5 w-24 overflow-hidden rounded-full bg-gray-100">
-                              <div
-                                className={`h-full rounded-full transition-all duration-1000 ${product.stock < 10 ? "bg-rose-500" : "bg-emerald-500"}`}
-                                style={{
-                                  width: `${Math.min(product.stock * 2, 100)}%`,
-                                }}
-                              />
-                            </div>
+                              <Edit3 className="h-4 w-4" />
+                            </button>
+                            <div className="h-6 w-px bg-gray-200 mx-1"></div>
+                            <button
+                              onClick={() =>
+                                navigate(`/inventory/${product.id}`)
+                              }
+                              className="text-gray-600 hover:text-gray-900 text-sm font-bold transition-colors hover:underline"
+                            >
+                              Details
+                            </button>
                           </div>
-                          {product.stock < 10 && (
-                            <div className="animate-pulse flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700">
-                              <AlertTriangle className="h-3 w-3" /> CRITICAL
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2 opacity-40 group-hover:opacity-100 transition-opacity">
-                          <button
-                            onClick={() => handleStockUpdate(product.id, 10)}
-                            className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-100"
-                            title="Add 10 units"
-                          >
-                            <TrendingUp className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleStockUpdate(product.id, -10)}
-                            className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-rose-100"
-                            title="Remove 10 units"
-                          >
-                            <TrendingDown className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleShowAdjustment(product)}
-                            className="p-2 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors border border-primary-100"
-                            title="Manual Adjustment"
-                          >
-                            <Settings2 className="h-4 w-4" />
-                          </button>
-                          <button
-                            onClick={() => handleShowEdit(product)}
-                            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-blue-100"
-                            title="Edit Product"
-                          >
-                            <Edit3 className="h-4 w-4" />
-                          </button>
-                          <div className="h-6 w-px bg-gray-200 mx-1"></div>
-                          <button
-                            onClick={() => handleShowDetails(product)}
-                            className="text-gray-600 hover:text-gray-900 text-sm font-bold transition-colors hover:underline"
-                          >
-                            Details
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+                        </td>
+                      </tr>
+                      {expandedProduct === product.id &&
+                        product.variants?.length > 0 && (
+                          <tr className="bg-gray-50/30 animate-in slide-in-from-top-4 duration-300">
+                            <td colSpan="4" className="px-12 py-4 shadow-inner">
+                              <div className="grid grid-cols-1 gap-2">
+                                {product.variants.map((v) => (
+                                  <div
+                                    key={v.id}
+                                    className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0 hover:bg-white px-5 rounded-2xl transition-all shadow-sm group"
+                                  >
+                                    <div className="flex items-center gap-8">
+                                      <div className="flex flex-col min-w-[100px]">
+                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                                          Weight
+                                        </span>
+                                        <span className="font-bold text-gray-900">
+                                          {v.weight}
+                                        </span>
+                                      </div>
+                                      <div className="flex flex-col min-w-[140px]">
+                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                                          Variant SKU
+                                        </span>
+                                        <span className="font-mono text-xs text-gray-500 uppercase">
+                                          {v.sku}
+                                        </span>
+                                      </div>
+                                      <div className="flex flex-col min-w-[100px]">
+                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                                          Price
+                                        </span>
+                                        <span className="font-black text-gray-900">
+                                          ${v.price.toFixed(2)}
+                                        </span>
+                                      </div>
+                                      <div className="flex flex-col min-w-[120px]">
+                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
+                                          Stock Level
+                                        </span>
+                                        <span
+                                          className={`font-bold ${v.stock < 5 ? "text-rose-600" : "text-emerald-600"}`}
+                                        >
+                                          {v.stock} units
+                                        </span>
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 opacity-40 group-hover:opacity-100 transition-opacity">
+                                      <button
+                                        onClick={() =>
+                                          handleVariantStockUpdate(
+                                            product.id,
+                                            v.id,
+                                            10,
+                                          )
+                                        }
+                                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors border border-emerald-100 bg-white shadow-sm"
+                                        title="Add 5 units"
+                                      >
+                                        <TrendingUp className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          handleVariantStockUpdate(
+                                            product.id,
+                                            v.id,
+                                            -10,
+                                          )
+                                        }
+                                        className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-rose-100 bg-white shadow-sm"
+                                        title="Remove 5 units"
+                                      >
+                                        <TrendingDown className="h-4 w-4" />
+                                      </button>
+                                      <button
+                                        onClick={() =>
+                                          handleShowVariantAdjustment(
+                                            product,
+                                            v,
+                                          )
+                                        }
+                                        className="p-2 text-primary-600 hover:bg-primary-50 rounded-xl transition-colors border border-primary-100 bg-white shadow-sm"
+                                        title="Manual Adjustment"
+                                      >
+                                        <Settings2 className="h-4 w-4" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                    </React.Fragment>
                   ))
               )}
             </tbody>
@@ -482,6 +642,107 @@ const Inventory = () => {
                     })
                   }
                 />
+              </div>
+
+              {/* Variants Section */}
+              <div className="space-y-4 rounded-2xl bg-gray-50 p-4 border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">
+                    Product Variants (Weight)
+                  </h4>
+                  <button
+                    onClick={() =>
+                      setNewProduct({
+                        ...newProduct,
+                        variants: [
+                          ...newProduct.variants,
+                          {
+                            weight: "",
+                            sku: `${newProduct.sku}-${newProduct.variants.length + 1}`,
+                            price: newProduct.price,
+                          },
+                        ],
+                      })
+                    }
+                    className="text-[10px] font-bold text-primary-600 hover:text-primary-700 bg-primary-50 px-2 py-1 rounded-lg transition-colors"
+                  >
+                    + Add Weight Variant
+                  </button>
+                </div>
+
+                {newProduct.variants.length === 0 ? (
+                  <p className="text-[10px] text-gray-400 italic">
+                    No variants added. Product will be listed as single item.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {newProduct.variants.map((variant, idx) => (
+                      <div
+                        key={idx}
+                        className="grid grid-cols-3 gap-2 items-end bg-white p-3 rounded-xl border border-gray-100 relative group animate-in slide-in-from-top-2 duration-200"
+                      >
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-gray-400 uppercase">
+                            Weight
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. 500g"
+                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none"
+                            value={variant.weight}
+                            onChange={(e) => {
+                              const v = [...newProduct.variants];
+                              v[idx].weight = e.target.value;
+                              setNewProduct({ ...newProduct, variants: v });
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-gray-400 uppercase">
+                            Variant SKU
+                          </label>
+                          <input
+                            type="text"
+                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-mono"
+                            value={variant.sku}
+                            onChange={(e) => {
+                              const v = [...newProduct.variants];
+                              v[idx].sku = e.target.value;
+                              setNewProduct({ ...newProduct, variants: v });
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-gray-400 uppercase">
+                            Price ($)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-bold"
+                            value={variant.price}
+                            onChange={(e) => {
+                              const v = [...newProduct.variants];
+                              v[idx].price = e.target.value;
+                              setNewProduct({ ...newProduct, variants: v });
+                            }}
+                          />
+                        </div>
+                        <button
+                          onClick={() => {
+                            const v = newProduct.variants.filter(
+                              (_, i) => i !== idx,
+                            );
+                            setNewProduct({ ...newProduct, variants: v });
+                          }}
+                          className="absolute -top-1 -right-1 p-1 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                        >
+                          <X className="h-2 w-2" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -638,6 +899,107 @@ const Inventory = () => {
                 />
               </div>
 
+              {/* Variants Section */}
+              <div className="space-y-4 rounded-2xl bg-gray-50 p-4 border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">
+                    Product Variants (Weight)
+                  </h4>
+                  <button
+                    onClick={() =>
+                      setEditProduct({
+                        ...editProduct,
+                        variants: [
+                          ...(editProduct.variants || []),
+                          {
+                            weight: "",
+                            sku: `${editProduct.sku}-${(editProduct.variants?.length || 0) + 1}`,
+                            price: editProduct.price,
+                          },
+                        ],
+                      })
+                    }
+                    className="text-[10px] font-bold text-primary-600 hover:text-primary-700 bg-primary-50 px-2 py-1 rounded-lg transition-colors"
+                  >
+                    + Add Weight Variant
+                  </button>
+                </div>
+
+                {!editProduct.variants || editProduct.variants.length === 0 ? (
+                  <p className="text-[10px] text-gray-400 italic">
+                    No variants added. Product will be listed as single item.
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    {editProduct.variants.map((variant, idx) => (
+                      <div
+                        key={idx}
+                        className="grid grid-cols-3 gap-2 items-end bg-white p-3 rounded-xl border border-gray-100 relative group animate-in slide-in-from-top-2 duration-200"
+                      >
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-gray-400 uppercase">
+                            Weight
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. 500g"
+                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none"
+                            value={variant.weight}
+                            onChange={(e) => {
+                              const v = [...editProduct.variants];
+                              v[idx].weight = e.target.value;
+                              setEditProduct({ ...editProduct, variants: v });
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-gray-400 uppercase">
+                            Variant SKU
+                          </label>
+                          <input
+                            type="text"
+                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-mono"
+                            value={variant.sku}
+                            onChange={(e) => {
+                              const v = [...editProduct.variants];
+                              v[idx].sku = e.target.value;
+                              setEditProduct({ ...editProduct, variants: v });
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-bold text-gray-400 uppercase">
+                            Price ($)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-bold"
+                            value={variant.price}
+                            onChange={(e) => {
+                              const v = [...editProduct.variants];
+                              v[idx].price = e.target.value;
+                              setEditProduct({ ...editProduct, variants: v });
+                            }}
+                          />
+                        </div>
+                        <button
+                          onClick={() => {
+                            const v = editProduct.variants.filter(
+                              (_, i) => i !== idx,
+                            );
+                            setEditProduct({ ...editProduct, variants: v });
+                          }}
+                          className="absolute -top-1 -right-1 p-1 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                        >
+                          <X className="h-2 w-2" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
                   Product Images (Current & New)
@@ -743,148 +1105,31 @@ const Inventory = () => {
         </div>
       )}
 
-      {/* Product Details Modal */}
-      {showDetailsModal && selectedProduct && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-2xl rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <div className="flex items-center justify-between mb-8">
-              <div>
-                <h3 className="text-2xl font-black text-gray-900">
-                  Product Details
-                </h3>
-                <p className="text-sm text-gray-400 font-mono uppercase tracking-tighter">
-                  {selectedProduct.sku}
-                </p>
-              </div>
-              <button
-                onClick={() => setShowDetailsModal(false)}
-                className="p-2 text-gray-400 hover:bg-gray-50 rounded-xl transition-colors"
-              >
-                <X className="h-6 w-6" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Image Gallery */}
-              <div className="space-y-4">
-                <div className="aspect-square rounded-2xl bg-gray-50 overflow-hidden border border-gray-100">
-                  {selectedProduct.images?.[0] ? (
-                    <img
-                      src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${selectedProduct.images[0]}`}
-                      className="w-full h-full object-cover"
-                      alt={selectedProduct.name}
-                    />
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-gray-300">
-                      <ImageIcon className="h-10 w-10 mb-2" />
-                      <span className="text-xs font-bold">NO ASSETS</span>
-                    </div>
-                  )}
-                </div>
-                <div className="grid grid-cols-4 gap-2">
-                  {selectedProduct.images?.map((img, idx) => (
-                    <div
-                      key={idx}
-                      className="aspect-square rounded-lg bg-gray-50 overflow-hidden border border-gray-100 cursor-pointer hover:border-primary-500 transition-colors"
-                    >
-                      <img
-                        src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${img}`}
-                        className="w-full h-full object-cover"
-                        alt={`view-${idx}`}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Info */}
-              <div className="space-y-6">
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                    Product Name
-                  </label>
-                  <h4 className="text-xl font-black text-gray-900">
-                    {selectedProduct.name}
-                  </h4>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                      Unit Price
-                    </label>
-                    <p className="text-lg font-black text-emerald-600">
-                      ${selectedProduct.price?.toFixed(2)}
-                    </p>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                      Current Stock
-                    </label>
-                    <p
-                      className={`text-lg font-black ${selectedProduct.stock < 10 ? "text-rose-600" : "text-gray-900"}`}
-                    >
-                      {selectedProduct.stock} Units
-                    </p>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                    Description
-                  </label>
-                  <p className="text-sm text-gray-600 leading-relaxed bg-gray-50 p-4 rounded-2xl">
-                    {selectedProduct.description ||
-                      "No description available for this product."}
-                  </p>
-                </div>
-
-                <div className="pt-4 border-t border-gray-100">
-                  <div className="flex items-center justify-between text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
-                    <span>
-                      Added on:{" "}
-                      {new Date(
-                        selectedProduct.created_at,
-                      ).toLocaleDateString()}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-10">
-              <button
-                onClick={() => setShowDetailsModal(false)}
-                className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black shadow-xl shadow-gray-900/10 hover:bg-black transition-all active:scale-95"
-              >
-                Close Overview
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Manual Adjustment Modal */}
       {showAdjustmentModal && selectedProduct && (
         <div className="fixed inset-0 z-60 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-sm rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200">
             <h3 className="text-xl font-black text-gray-900 mb-2">
-              Adjust Stock
+              {selectedVariant
+                ? `Adjust Variant: ${selectedVariant.weight}`
+                : "Manual Adjustment"}
             </h3>
-            <p className="text-xs text-gray-500 mb-6">
-              Enter a positive number to add stock, or a negative number to
-              remove.
+            <p className="text-xs text-gray-500 mb-6 font-medium">
+              Update the current stock level for
+              <span className="font-bold text-gray-900 mx-1">
+                {selectedVariant ? selectedVariant.sku : selectedProduct.sku}
+              </span>
             </p>
 
             <div className="space-y-4">
               <div>
                 <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                  Adjustment Amount
+                  New Total Quantity
                 </label>
                 <input
                   type="number"
-                  placeholder="e.g. 50 or -25"
-                  className="w-full mt-2 px-6 py-4 bg-gray-50 border-none rounded-2xl font-bold text-lg focus:ring-2 focus:ring-primary-500/20 outline-none"
+                  placeholder="e.g. 100"
+                  className="w-full mt-2 px-6 py-4 bg-gray-50 border-none rounded-2xl font-black text-xl focus:ring-2 focus:ring-primary-500/20 outline-none"
                   value={adjustmentAmount}
                   onChange={(e) => setAdjustmentAmount(e.target.value)}
                   autoFocus

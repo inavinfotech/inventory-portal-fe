@@ -2,10 +2,11 @@ import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import MainLayout from "./layouts/MainLayout";
 import Dashboard from "./pages/Dashboard";
-import Inventory from "./pages/Inventory";
+import Inventory from "./pages/Inventory"; // HMR kick
 import Movements from "./pages/Movements";
 import Reservations from "./pages/Reservations";
 import Settings from "./pages/Settings";
+import ProductDetailPage from "./pages/ProductDetailPage";
 
 import Login from "./pages/Login";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -23,6 +24,10 @@ function App() {
                 <Route element={<MainLayout />}>
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/inventory" element={<Inventory />} />
+                  <Route
+                    path="/inventory/:productId"
+                    element={<ProductDetailPage />}
+                  />
                   <Route path="/movements" element={<Movements />} />
                   <Route path="/reservations" element={<Reservations />} />
                   <Route path="/settings" element={<Settings />} />

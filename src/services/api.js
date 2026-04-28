@@ -33,6 +33,7 @@ api.interceptors.response.use(
 export const inventoryService = {
   getProducts: (limit = 10, offset = 0) =>
     api.get(`/products/?limit=${limit}&offset=${offset}`),
+  getProduct: (id) => api.get(`/products/${id}`),
   getProductStock: (id) => api.get(`/inventory/${id}`),
   addStock: (data) => api.post("/inventory/add", data),
   removeStock: (data) => api.post("/inventory/remove", data),
@@ -43,8 +44,12 @@ export const inventoryService = {
   getMovements: (params) => api.get("/inventory/movements/", { params }),
   addProduct: (data) => api.post("/products/", data),
   updateProduct: (id, data) => api.put(`/products/${id}`, data),
-  updateStock: (id, amount) =>
-    api.post(`/inventory/adjust`, { product_id: id, quantity: amount }),
+  updateStock: (id, amount, variantId = null) =>
+    api.post(`/inventory/adjust`, {
+      product_id: id,
+      new_quantity: amount,
+      variant_id: variantId,
+    }),
   addMovement: (data) => api.post("/movements/", data),
   uploadImages: (files) => {
     const formData = new FormData();
