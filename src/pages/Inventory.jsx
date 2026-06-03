@@ -14,8 +14,10 @@ import {
   Image as ImageIcon,
   Settings2,
   Edit3,
+  Barcode as BarcodeIcon,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
+import BarcodeModal from "../components/BarcodeModal";
 
 const Inventory = () => {
   const navigate = useNavigate();
@@ -40,6 +42,15 @@ const Inventory = () => {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [expandedProduct, setExpandedProduct] = useState(null);
+  const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
+  const [barcodeSku, setBarcodeSku] = useState("");
+  const [barcodeName, setBarcodeName] = useState("");
+
+  const openBarcodeModal = (sku, name) => {
+    setBarcodeSku(sku);
+    setBarcodeName(name);
+    setBarcodeModalOpen(true);
+  };
 
   useEffect(() => {
     fetchInventory();
@@ -359,8 +370,20 @@ const Inventory = () => {
                               <span className="font-bold text-gray-900">
                                 {product.name}
                               </span>
-                              <span className="text-[10px] font-mono text-gray-400 uppercase tracking-tighter">
-                                {product.sku}{" "}
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-[10px] font-mono text-gray-400 uppercase tracking-tighter">
+                                  {product.sku}
+                                </span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openBarcodeModal(product.sku, product.name);
+                                  }}
+                                  className="p-0.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                                  title="Barcode"
+                                >
+                                  <BarcodeIcon className="h-3 w-3" />
+                                </button>
                                 {product.variants?.length > 0 && (
                                   <button
                                     onClick={(e) => {
@@ -371,7 +394,7 @@ const Inventory = () => {
                                           : product.id,
                                       );
                                     }}
-                                    className="ml-2 text-primary-600 hover:underline font-bold"
+                                    className="ml-2 text-primary-600 hover:underline font-bold text-[10px]"
                                   >
                                     * {product.variants.length} Weights{" "}
                                     {expandedProduct === product.id
@@ -379,15 +402,15 @@ const Inventory = () => {
                                       : "Down"}
                                   </button>
                                 )}
-                              </span>
+                              </div>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
                           <span className="font-black text-gray-900">
                             {product.variants?.length > 0
-                              ? `$${Math.min(...product.variants.map((v) => v.price)).toFixed(2)} - $${Math.max(...product.variants.map((v) => v.price)).toFixed(2)}`
-                              : `$${product.price?.toFixed(2)}`}
+                              ? `₹${Math.min(...product.variants.map((v) => v.price)).toFixed(2)} - ₹${Math.max(...product.variants.map((v) => v.price)).toFixed(2)}`
+                              : `₹${product.price?.toFixed(2)}`}
                           </span>
                         </td>
                         <td className="px-6 py-4">
@@ -488,16 +511,25 @@ const Inventory = () => {
                                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
                                           Variant SKU
                                         </span>
-                                        <span className="font-mono text-xs text-gray-500 uppercase">
-                                          {v.sku}
-                                        </span>
+                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                          <span className="font-mono text-xs text-gray-500 uppercase">
+                                            {v.sku}
+                                          </span>
+                                          <button
+                                            onClick={() => openBarcodeModal(v.sku, `${product.name} (${v.weight})`)}
+                                            className="p-0.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors cursor-pointer"
+                                            title="Barcode"
+                                          >
+                                            <BarcodeIcon className="h-3 w-3" />
+                                          </button>
+                                        </div>
                                       </div>
                                       <div className="flex flex-col min-w-[100px]">
                                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
                                           Price
                                         </span>
                                         <span className="font-black text-gray-900">
-                                          ${v.price.toFixed(2)}
+                                          ₹{v.price.toFixed(2)}
                                         </span>
                                       </div>
                                       <div className="flex flex-col min-w-[120px]">
@@ -612,7 +644,7 @@ const Inventory = () => {
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Base Price ($)
+                  Base Price (₹)
                 </label>
                 <input
                   type="number"
@@ -714,7 +746,7 @@ const Inventory = () => {
                         </div>
                         <div className="space-y-1">
                           <label className="text-[9px] font-bold text-gray-400 uppercase">
-                            Price ($)
+                            Price (₹)
                           </label>
                           <input
                             type="number"
@@ -868,7 +900,7 @@ const Inventory = () => {
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Base Price ($)
+                  Base Price (₹)
                 </label>
                 <input
                   type="number"
@@ -969,7 +1001,7 @@ const Inventory = () => {
                         </div>
                         <div className="space-y-1">
                           <label className="text-[9px] font-bold text-gray-400 uppercase">
-                            Price ($)
+                            Price (₹)
                           </label>
                           <input
                             type="number"
@@ -1154,6 +1186,12 @@ const Inventory = () => {
           </div>
         </div>
       )}
+      <BarcodeModal
+        isOpen={barcodeModalOpen}
+        onClose={() => setBarcodeModalOpen(false)}
+        sku={barcodeSku}
+        productName={barcodeName}
+      />
     </div>
   );
 };

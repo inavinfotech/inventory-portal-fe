@@ -10,11 +10,13 @@ import {
   AlertTriangle,
   History,
   Info,
-  DollarSign,
+  IndianRupee,
   Activity,
   Image as ImageIcon,
+  Barcode as BarcodeIcon,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
+import BarcodeModal from "../components/BarcodeModal";
 
 const ProductDetailPage = () => {
   const { productId } = useParams();
@@ -24,6 +26,15 @@ const ProductDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [movementsLoading, setMovementsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
+  const [barcodeSku, setBarcodeSku] = useState("");
+  const [barcodeName, setBarcodeName] = useState("");
+
+  const openBarcodeModal = (sku, name) => {
+    setBarcodeSku(sku);
+    setBarcodeName(name);
+    setBarcodeModalOpen(true);
+  };
 
   useEffect(() => {
     fetchProductDetails();
@@ -108,9 +119,18 @@ const ProductDetailPage = () => {
               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-black uppercase rounded-lg tracking-widest border border-gray-200">
                 PROD-{product.id}
               </span>
-              <span className="font-mono text-gray-400 text-[10px] uppercase tracking-tighter">
-                SKU: {product.sku}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-gray-400 text-[10px] uppercase tracking-tighter">
+                  SKU: {product.sku}
+                </span>
+                <button
+                  onClick={() => openBarcodeModal(product.sku, product.name)}
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-gray-50 hover:bg-gray-100 hover:text-gray-900 border border-gray-200 rounded-lg text-[9px] font-bold text-gray-500 transition-all cursor-pointer"
+                  title="Generate Barcode"
+                >
+                  <BarcodeIcon className="h-2.5 w-2.5" /> Barcode
+                </button>
+              </div>
             </div>
             <h1 className="text-3xl font-black text-gray-900 tracking-tight">
               {product.name}
@@ -155,9 +175,9 @@ const ProductDetailPage = () => {
           color="emerald"
         />
         <StatCard
-          icon={<DollarSign className="text-indigo-500" />}
+          icon={<IndianRupee className="text-indigo-500" />}
           label="Unit Valuation"
-          value={`$${product.price.toLocaleString()}`}
+          value={`₹${product.price.toLocaleString()}`}
           description="Base listing price"
           color="indigo"
         />
@@ -201,16 +221,25 @@ const ProductDetailPage = () => {
                           <p className="text-[10px] font-black text-gray-400 uppercase mb-1">
                             SKU
                           </p>
-                          <p className="font-mono text-xs text-gray-500">
-                            {v.sku}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <p className="font-mono text-xs text-gray-500">
+                              {v.sku}
+                            </p>
+                            <button
+                              onClick={() => openBarcodeModal(v.sku, `${product.name} (${v.weight})`)}
+                              className="p-1 bg-white hover:bg-gray-100 border border-gray-100 hover:border-gray-200 rounded-lg text-gray-400 hover:text-gray-900 transition-all cursor-pointer"
+                              title="Generate Barcode"
+                            >
+                              <BarcodeIcon className="h-3 w-3" />
+                            </button>
+                          </div>
                         </div>
                         <div>
                           <p className="text-[10px] font-black text-gray-400 uppercase mb-1">
                             Retail Price
                           </p>
                           <p className="font-black text-gray-900">
-                            ${v.price.toLocaleString()}
+                            ₹{v.price.toLocaleString()}
                           </p>
                         </div>
                         <div className="text-right flex flex-col items-end">
@@ -370,6 +399,13 @@ const ProductDetailPage = () => {
           </section>
         </div>
       </div>
+
+      <BarcodeModal
+        isOpen={barcodeModalOpen}
+        onClose={() => setBarcodeModalOpen(false)}
+        sku={barcodeSku}
+        productName={barcodeName}
+      />
     </div>
   );
 };
