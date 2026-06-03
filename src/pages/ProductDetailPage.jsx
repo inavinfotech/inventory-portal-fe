@@ -12,8 +12,10 @@ import {
   Info,
   IndianRupee,
   Activity,
+  Settings2,
   Image as ImageIcon,
   Barcode as BarcodeIcon,
+  X,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
 import BarcodeModal from "../components/BarcodeModal";
@@ -34,6 +36,96 @@ const ProductDetailPage = () => {
     setBarcodeSku(sku);
     setBarcodeName(name);
     setBarcodeModalOpen(true);
+  };
+
+  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
+  const [selectedVariant, setSelectedVariant] = useState(null);
+  const [adjustmentAmount, setAdjustmentAmount] = useState("");
+  const [zoomedImage, setZoomedImage] = useState(null);
+
+  const handleStockUpdate = async (amount) => {
+    try {
+      if (amount > 0) {
+        await inventoryService.addStock({
+          product_id: product.id,
+          quantity: amount,
+        });
+      } else {
+        await inventoryService.removeStock({
+          product_id: product.id,
+          quantity: Math.abs(amount),
+        });
+      }
+      fetchProductDetails();
+      fetchProductMovements();
+    } catch (err) {
+      alert("Stock update failed: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleVariantStockUpdate = async (variantId, amount) => {
+    try {
+      if (amount > 0) {
+        await inventoryService.addStock({
+          product_id: product.id,
+          variant_id: variantId,
+          quantity: amount,
+        });
+      } else {
+        await inventoryService.removeStock({
+          product_id: product.id,
+          variant_id: variantId,
+          quantity: Math.abs(amount),
+        });
+      }
+      fetchProductDetails();
+      fetchProductMovements();
+    } catch (err) {
+      alert("Variant stock update failed: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleShowAdjustment = () => {
+    setSelectedVariant(null);
+    setAdjustmentAmount(product.stock.toString());
+    setShowAdjustmentModal(true);
+  };
+
+  const handleShowVariantAdjustment = (variant) => {
+    setSelectedVariant(variant);
+    setAdjustmentAmount(variant.stock.toString());
+    setShowAdjustmentModal(true);
+  };
+
+  const handleManualAdjustment = async () => {
+    const amount = parseInt(adjustmentAmount);
+    if (isNaN(amount) || amount < 0) {
+      alert("Please enter a valid non-negative number");
+      return;
+    }
+
+    try {
+      await inventoryService.updateStock(
+        product.id,
+        amount,
+        selectedVariant?.id
+      );
+
+      await inventoryService.addMovement({
+        product_id: product.id,
+        variant_id: selectedVariant?.id,
+        type: amount > (selectedVariant ? selectedVariant.stock : product.stock) ? "IN" : "OUT",
+        quantity: Math.abs(amount - (selectedVariant ? selectedVariant.stock : product.stock)),
+        reference_id: "manual_adjustment",
+      });
+
+      setShowAdjustmentModal(false);
+      setSelectedVariant(null);
+      fetchProductDetails();
+      fetchProductMovements();
+    } catch (err) {
+      alert("Adjustment failed: " + (err.response?.data?.detail || err.message));
+    }
   };
 
   useEffect(() => {
@@ -110,10 +202,21 @@ const ProductDetailPage = () => {
         <div className="flex items-center gap-5">
           <button
             onClick={() => navigate("/inventory")}
-            className="w-12 h-12 rounded-2xl bg-white border border-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:border-gray-200 transition-all shadow-sm"
+            className="w-12 h-12 rounded-2xl bg-white border border-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:border-gray-200 transition-all shadow-sm shrink-0"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
+          
+          {product.images?.length > 0 && (
+            <div className="h-14 w-14 rounded-2xl bg-white border border-gray-100 flex items-center justify-center overflow-hidden shadow-sm shrink-0">
+              <img
+                src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${product.images[0]}`}
+                className="w-full h-full object-cover"
+                alt={product.name}
+              />
+            </div>
+          )}
+
           <div>
             <div className="flex items-center gap-2 mb-1">
               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-black uppercase rounded-lg tracking-widest border border-gray-200">
@@ -186,6 +289,33 @@ const ProductDetailPage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left Column: Product Info & Variants */}
         <div className="lg:col-span-2 space-y-8">
+          {/* Main Product Visual Showcase */}
+          {product.images?.length > 0 && (
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden p-6 flex flex-col sm:flex-row gap-6 items-center">
+              <div className="w-full sm:w-48 h-48 rounded-2xl bg-gray-50 border border-gray-100 overflow-hidden shrink-0 flex items-center justify-center">
+                <img
+                  src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${product.images[0]}`}
+                  className="w-full h-full object-cover hover:scale-105 transition-transform duration-500 cursor-zoom-in"
+                  alt={product.name}
+                  onClick={() => setZoomedImage(`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${product.images[0]}`)}
+                />
+              </div>
+              <div className="flex-1 space-y-3">
+                <span className="px-2.5 py-1 bg-indigo-50 border border-indigo-100 text-indigo-700 text-[10px] font-black uppercase rounded-lg tracking-widest inline-block">
+                  Primary Asset
+                </span>
+                <h2 className="text-xl font-black text-gray-900">{product.name}</h2>
+                <p className="text-xs text-gray-500 leading-relaxed">
+                  {product.description || "No description provided for this catalog item."}
+                </p>
+                <div className="text-[10px] text-gray-400 font-bold uppercase tracking-widest flex items-center gap-1.5">
+                  <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span>
+                  Active in Catalog
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Detailed Info */}
           <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="px-8 py-6 border-b border-gray-50 bg-gray-50/50 flex items-center justify-between">
@@ -242,7 +372,7 @@ const ProductDetailPage = () => {
                             ₹{v.price.toLocaleString()}
                           </p>
                         </div>
-                        <div className="text-right flex flex-col items-end">
+                        <div className="text-right flex flex-col items-end gap-2">
                           <p className="text-[10px] font-black text-gray-400 uppercase mb-1">
                             Inventory Status
                           </p>
@@ -261,16 +391,74 @@ const ProductDetailPage = () => {
                               className={`w-2 h-2 rounded-full ${v.stock > 0 ? "bg-emerald-500" : "bg-rose-500"} animate-pulse`}
                             ></div>
                           </div>
+                          <div className="flex items-center gap-1 mt-1.5">
+                            <button
+                              onClick={() => handleVariantStockUpdate(v.id, 10)}
+                              className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors border border-emerald-100 bg-white shadow-sm cursor-pointer"
+                              title="Add 10 units"
+                            >
+                              <TrendingUp className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleVariantStockUpdate(v.id, -10)}
+                              className="p-1 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-rose-100 bg-white shadow-sm cursor-pointer"
+                              title="Remove 10 units"
+                            >
+                              <TrendingDown className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleShowVariantAdjustment(v)}
+                              className="p-1 text-primary-600 hover:bg-primary-50 rounded-lg transition-colors border border-primary-100 bg-white shadow-sm cursor-pointer"
+                              title="Manual Adjustment"
+                            >
+                              <Settings2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="p-8 text-center bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                  <p className="text-sm text-gray-500 italic">
-                    This product does not have any weight-based variants.
-                  </p>
+                <div className="space-y-4">
+                  <div className="p-8 text-center bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                    <p className="text-sm text-gray-500 italic">
+                      This product does not have any weight-based variants.
+                    </p>
+                  </div>
+                  <div className="p-6 bg-gray-50 rounded-2xl border border-gray-200/80 flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div>
+                      <h4 className="text-xs font-black text-gray-900 uppercase tracking-widest mb-1">
+                        Quick Stock Adjustment
+                      </h4>
+                      <p className="text-[10px] text-gray-400 font-medium">
+                        Adjust direct base inventory stock for this item.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleStockUpdate(10)}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-white text-emerald-600 border border-emerald-100 hover:border-emerald-500 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
+                        title="Add 10 units"
+                      >
+                        <TrendingUp className="h-3.5 w-3.5" /> +10
+                      </button>
+                      <button
+                        onClick={() => handleStockUpdate(-10)}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-white text-rose-600 border border-rose-100 hover:border-rose-500 rounded-xl text-xs font-bold shadow-sm transition-all cursor-pointer"
+                        title="Remove 10 units"
+                      >
+                        <TrendingDown className="h-3.5 w-3.5" /> -10
+                      </button>
+                      <button
+                        onClick={handleShowAdjustment}
+                        className="flex items-center gap-1.5 px-3 py-2 bg-gray-900 hover:bg-black text-white rounded-xl text-xs font-bold shadow-md transition-all cursor-pointer"
+                        title="Manual Adjustment"
+                      >
+                        <Settings2 className="h-3.5 w-3.5" /> Set Qty
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -291,8 +479,9 @@ const ProductDetailPage = () => {
                   >
                     <img
                       src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${img}`}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 cursor-zoom-in"
                       alt={`View ${idx + 1}`}
+                      onClick={() => setZoomedImage(`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${img}`)}
                     />
                   </div>
                 ))}
@@ -406,6 +595,79 @@ const ProductDetailPage = () => {
         sku={barcodeSku}
         productName={barcodeName}
       />
+
+      {/* Manual Adjustment Modal */}
+      {showAdjustmentModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-black text-gray-900 mb-2">
+              {selectedVariant
+                ? `Adjust Variant: ${selectedVariant.weight}`
+                : "Manual Adjustment"}
+            </h3>
+            <p className="text-xs text-gray-500 mb-6 font-medium">
+              Update the current stock level for
+              <span className="font-bold text-gray-900 mx-1">
+                {selectedVariant ? selectedVariant.sku : product.sku}
+              </span>
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                  New Total Quantity
+                </label>
+                <input
+                  type="number"
+                  placeholder="e.g. 100"
+                  className="w-full mt-2 px-6 py-4 bg-gray-50 border-none rounded-2xl font-black text-xl focus:ring-2 focus:ring-primary-500/20 outline-none"
+                  value={adjustmentAmount}
+                  onChange={(e) => setAdjustmentAmount(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => setShowAdjustmentModal(false)}
+                  className="flex-1 py-4 text-gray-400 font-bold hover:bg-gray-50 rounded-2xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleManualAdjustment}
+                  className="flex-1 py-4 bg-primary-600 text-white rounded-2xl font-black shadow-lg shadow-primary-500/30 hover:bg-primary-700 transition-all active:scale-95 cursor-pointer"
+                >
+                  Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Image Preview Modal */}
+      {zoomedImage && (
+        <div
+          className="fixed inset-0 z-70 flex items-center justify-center bg-gray-900/80 backdrop-blur-md p-4 animate-in fade-in duration-200 cursor-zoom-out"
+          onClick={() => setZoomedImage(null)}
+        >
+          <div className="relative max-w-4xl max-h-[90vh] overflow-hidden rounded-2xl bg-white/5 border border-white/10 p-2 shadow-2xl animate-in zoom-in-95 duration-200 flex items-center justify-center">
+            <button
+              onClick={() => setZoomedImage(null)}
+              className="absolute top-4 right-4 p-2 bg-gray-900/60 hover:bg-gray-900 text-white rounded-full transition-colors shadow-lg cursor-pointer"
+              title="Close Preview"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <img
+              src={zoomedImage}
+              className="max-w-full max-h-[85vh] object-contain rounded-xl select-none"
+              alt="Zoomed View"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
