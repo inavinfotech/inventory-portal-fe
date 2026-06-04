@@ -113,6 +113,7 @@ const Inventory = () => {
       setShowAdjustmentModal(false);
       setSelectedVariant(null);
       fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert(
         "Adjustment failed: " + (err.response?.data?.detail || err.message),
@@ -161,6 +162,7 @@ const Inventory = () => {
       });
       setSelectedFiles([]);
       fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert(
         "Failed to add product: " + (err.response?.data?.detail || err.message),
@@ -207,6 +209,7 @@ const Inventory = () => {
       setEditProduct(null);
       setSelectedFiles([]);
       fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert(
         "Failed to update product: " +
@@ -231,6 +234,7 @@ const Inventory = () => {
         });
       }
       fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert(
         "Stock update failed: " + (err.response?.data?.detail || err.message),
@@ -254,6 +258,7 @@ const Inventory = () => {
         });
       }
       fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert(
         "Variant stock update failed: " +

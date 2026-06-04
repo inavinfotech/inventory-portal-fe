@@ -58,6 +58,7 @@ const ProductDetailPage = () => {
       }
       fetchProductDetails();
       fetchProductMovements();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert("Stock update failed: " + (err.response?.data?.detail || err.message));
     }
@@ -80,6 +81,7 @@ const ProductDetailPage = () => {
       }
       fetchProductDetails();
       fetchProductMovements();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert("Variant stock update failed: " + (err.response?.data?.detail || err.message));
     }
@@ -123,6 +125,7 @@ const ProductDetailPage = () => {
       setSelectedVariant(null);
       fetchProductDetails();
       fetchProductMovements();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert("Adjustment failed: " + (err.response?.data?.detail || err.message));
     }
