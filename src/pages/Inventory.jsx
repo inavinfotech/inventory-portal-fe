@@ -882,15 +882,13 @@ const Inventory = () => {
                 </div>
                 <div className="space-y-1">
                   <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                    SKU Identity
+                    SKU Identity (Blocked)
                   </label>
                   <input
                     type="text"
-                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-sm text-gray-900"
+                    disabled
+                    className="w-full px-4 py-3 bg-gray-100 border-none rounded-xl font-mono text-sm text-gray-400 cursor-not-allowed"
                     value={editProduct.sku}
-                    onChange={(e) =>
-                      setEditProduct({ ...editProduct, sku: e.target.value })
-                    }
                   />
                 </div>
               </div>
@@ -982,11 +980,16 @@ const Inventory = () => {
                         </div>
                         <div className="space-y-1">
                           <label className="text-[9px] font-bold text-gray-400 uppercase">
-                            Variant SKU
+                            Variant SKU {variant.id ? "(Blocked)" : ""}
                           </label>
                           <input
                             type="text"
-                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-mono"
+                            disabled={!!variant.id}
+                            className={`w-full px-2 py-1.5 text-xs rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-mono ${
+                              variant.id
+                                ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                                : "bg-gray-50 text-gray-900"
+                            }`}
                             value={variant.sku}
                             onChange={(e) => {
                               const v = [...editProduct.variants];
