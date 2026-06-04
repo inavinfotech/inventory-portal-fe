@@ -187,7 +187,7 @@ const Inventory = () => {
 
       if (selectedFiles.length > 0) {
         const uploadRes = await inventoryService.uploadImages(selectedFiles);
-        imageUrls = [...imageUrls, ...uploadRes.data].slice(0, 4);
+        imageUrls = [...imageUrls, ...uploadRes.data];
       }
 
       const { id, stock, created_at, updated_at, ...updateData } = editProduct;
@@ -779,7 +779,7 @@ const Inventory = () => {
 
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Product Images (Max 4)
+                  Product Images
                 </label>
                 <div className="grid grid-cols-4 gap-2">
                   {selectedFiles.map((file, idx) => (
@@ -804,7 +804,6 @@ const Inventory = () => {
                       </button>
                     </div>
                   ))}
-                  {selectedFiles.length < 4 && (
                     <label className="aspect-square rounded-xl bg-gray-50 border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
                       <Upload className="h-5 w-5 text-gray-400" />
                       <span className="text-[10px] font-bold text-gray-400 mt-1">
@@ -817,13 +816,10 @@ const Inventory = () => {
                         accept="image/*"
                         onChange={(e) => {
                           const files = Array.from(e.target.files);
-                          setSelectedFiles((prev) =>
-                            [...prev, ...files].slice(0, 4),
-                          );
+                          setSelectedFiles((prev) => [...prev, ...files]);
                         }}
                       />
                     </label>
-                  )}
                 </div>
               </div>
             </div>
@@ -1084,30 +1080,22 @@ const Inventory = () => {
                       </button>
                     </div>
                   ))}
-                  {(editProduct.images?.length || 0) + selectedFiles.length <
-                    4 && (
-                    <label className="aspect-square rounded-xl bg-gray-50 border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
-                      <Upload className="h-5 w-5 text-gray-400" />
-                      <span className="text-[10px] font-bold text-gray-400 mt-1">
-                        Add
-                      </span>
-                      <input
-                        type="file"
-                        className="hidden"
-                        multiple
-                        accept="image/*"
-                        onChange={(e) => {
-                          const files = Array.from(e.target.files);
-                          setSelectedFiles((prev) =>
-                            [...prev, ...files].slice(
-                              0,
-                              4 - (editProduct.images?.length || 0),
-                            ),
-                          );
-                        }}
-                      />
-                    </label>
-                  )}
+                  <label className="aspect-square rounded-xl bg-gray-50 border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
+                    <Upload className="h-5 w-5 text-gray-400" />
+                    <span className="text-[10px] font-bold text-gray-400 mt-1">
+                      Add
+                    </span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      multiple
+                      accept="image/*"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files);
+                        setSelectedFiles((prev) => [...prev, ...files]);
+                      }}
+                    />
+                  </label>
                 </div>
               </div>
             </div>
