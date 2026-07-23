@@ -17,6 +17,7 @@ import {
   Sparkles,
   Layers,
   Barcode,
+  Barcode as BarcodeIcon,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
 import { generateProductSku, generateVariantSku, sanitizeSkuInput } from "../utils/skuGenerator";
@@ -46,6 +47,15 @@ const Inventory = () => {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [expandedProduct, setExpandedProduct] = useState(null);
+  const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
+  const [barcodeSku, setBarcodeSku] = useState("");
+  const [barcodeName, setBarcodeName] = useState("");
+
+  const openBarcodeModal = (sku, name) => {
+    setBarcodeSku(sku);
+    setBarcodeName(name);
+    setBarcodeModalOpen(true);
+  };
 
   // Dynamic Option Niches Generator States
   const [addOptionNiches, setAddOptionNiches] = useState([
@@ -94,7 +104,6 @@ const Inventory = () => {
 
     const valueArrays = validNiches.map((n) => n.values);
     const combinations = cartesian(valueArrays);
-    const prefix = baseSku ? baseSku.trim().toUpperCase() : "PROD";
 
     return combinations.map((combo) => {
       const attributes = {};
@@ -176,6 +185,7 @@ const Inventory = () => {
       setShowAdjustmentModal(false);
       setSelectedVariant(null);
       fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert(
         "Adjustment failed: " + (err.response?.data?.detail || err.message),
@@ -184,14 +194,8 @@ const Inventory = () => {
   };
 
   const handleAddProduct = async () => {
-    // Basic Validation
-    if (
-      !newProduct.name ||
-      !newProduct.sku ||
-      !newProduct.price ||
-      parseFloat(newProduct.price) <= 0
-    ) {
-      alert("Please provide a valid name, SKU, and price (> 0)");
+    if (!newProduct.name || !newProduct.sku || !newProduct.price) {
+      alert("Please fill in all required fields (Name, SKU, Base Price)");
       return;
     }
 
@@ -204,20 +208,18 @@ const Inventory = () => {
         imageUrls = uploadRes.data;
       }
 
-      await inventoryService.addProduct({
+      const productPayload = {
         ...newProduct,
         price: parseFloat(newProduct.price),
         images: imageUrls,
         variants: newProduct.variants.map((v) => ({
-          sku: v.sku,
-          size: v.size || (v.attributes?.Size || v.attributes?.size || null),
-          color: v.color || (v.attributes?.Color || v.attributes?.color || null),
-          weight: v.weight || (v.attributes?.Weight || v.attributes?.weight || null),
-          attributes: v.attributes || null,
+          ...v,
           price: parseFloat(v.price || newProduct.price),
-          initial_stock: parseInt(v.stock || v.initial_stock || 0) || 0,
+          initial_stock: parseInt(v.stock || 0),
         })),
-      });
+      };
+
+      await inventoryService.createProduct(productPayload);
 
       setShowAddModal(false);
       setNewProduct({
@@ -234,6 +236,7 @@ const Inventory = () => {
         { name: "Color", values: "Red, Green, Blue" },
       ]);
       fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert(
         "Failed to add product: " + (err.response?.data?.detail || err.message),
@@ -244,47 +247,42 @@ const Inventory = () => {
   };
 
   const handleUpdateProduct = async () => {
-    if (
-      !editProduct.name ||
-      !editProduct.sku ||
-      !editProduct.price ||
-      parseFloat(editProduct.price) <= 0
-    ) {
-      alert("Please provide a valid name, SKU, and price (> 0)");
+    if (!editProduct.name || !editProduct.sku || !editProduct.price) {
+      alert("Please fill in all required fields");
       return;
     }
 
     try {
       setIsUploading(true);
-      let imageUrls = [...(editProduct.images || [])];
+      let imageUrls = editProduct.images || [];
 
       if (selectedFiles.length > 0) {
         const uploadRes = await inventoryService.uploadImages(selectedFiles);
-        imageUrls = [...imageUrls, ...uploadRes.data].slice(0, 4);
+        imageUrls = [...imageUrls, ...uploadRes.data];
       }
 
       const { id, stock, created_at, updated_at, ...updateData } = editProduct;
-      await inventoryService.updateProduct(id, {
+      const payload = {
         ...updateData,
-        price: parseFloat(updateData.price),
+        price: parseFloat(editProduct.price),
         images: imageUrls,
-        variants: updateData.variants?.map((v) => ({
-          id: v.id || undefined,
-          sku: v.sku,
-          size: v.size || (v.attributes?.Size || v.attributes?.size || null),
-          color: v.color || (v.attributes?.Color || v.attributes?.color || null),
-          weight: v.weight || (v.attributes?.Weight || v.attributes?.weight || null),
-          attributes: v.attributes || null,
-          price: parseFloat(v.price || updateData.price),
-          stock: parseInt(v.stock || 0) || 0,
-        })),
-      });
+        variants: editProduct.variants
+          ? editProduct.variants.map((v) => ({
+              ...v,
+              price: parseFloat(v.price || editProduct.price),
+              stock: parseInt(v.stock || 0),
+            }))
+          : [],
+      };
+
+      await inventoryService.updateProduct(id, payload);
 
       setShowEditModal(false);
       setEditProduct(null);
       setSelectedFiles([]);
       setShowGenEdit(false);
       fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert(
         "Failed to update product: " +
@@ -309,6 +307,7 @@ const Inventory = () => {
         });
       }
       fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert(
         "Stock update failed: " + (err.response?.data?.detail || err.message),
@@ -332,19 +331,13 @@ const Inventory = () => {
         });
       }
       fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert(
         "Variant stock update failed: " +
           (err.response?.data?.detail || err.message),
       );
     }
-  };
-
-  const handleShowVariantAdjustment = (product, variant) => {
-    setSelectedProduct(product);
-    setSelectedVariant(variant);
-    setAdjustmentAmount(variant.stock.toString());
-    setShowAdjustmentModal(true);
   };
 
   if (loading)
@@ -403,12 +396,9 @@ const Inventory = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
-        <button className="inline-flex items-center gap-2 rounded-xl border border-gray-100 bg-white px-4 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-50 transition-colors">
-          <Filter className="h-4 w-4" /> Filters
-        </button>
       </div>
 
-      {/* Product Table */}
+      {/* Table */}
       <div className="overflow-hidden rounded-2xl bg-white shadow-sm border border-gray-100">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -457,8 +447,20 @@ const Inventory = () => {
                               <span className="font-bold text-gray-900">
                                 {product.name}
                               </span>
-                              <span className="text-[10px] font-mono text-gray-400 uppercase tracking-tighter">
-                                {product.sku}{" "}
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className="text-[10px] font-mono text-gray-400 uppercase tracking-tighter">
+                                  {product.sku}
+                                </span>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setBarcodeModal({ sku: product.sku, title: product.name, price: product.price });
+                                  }}
+                                  className="p-0.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
+                                  title="Barcode"
+                                >
+                                  <BarcodeIcon className="h-3 w-3" />
+                                </button>
                                 {product.variants?.length > 0 && (
                                   <button
                                     onClick={(e) => {
@@ -469,7 +471,7 @@ const Inventory = () => {
                                           : product.id,
                                       );
                                     }}
-                                    className="ml-2 text-primary-600 hover:underline font-bold"
+                                    className="ml-2 text-primary-600 hover:underline font-bold text-[10px]"
                                   >
                                     * {product.variants.length} Combinations{" "}
                                     {expandedProduct === product.id
@@ -477,43 +479,33 @@ const Inventory = () => {
                                       : "Down"}
                                   </button>
                                 )}
-                              </span>
+                              </div>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
                           <span className="font-black text-gray-900">
                             {product.variants?.length > 0
-                              ? `$${Math.min(...product.variants.map((v) => v.price)).toFixed(2)} - $${Math.max(...product.variants.map((v) => v.price)).toFixed(2)}`
-                              : `$${product.price?.toFixed(2)}`}
+                              ? `₹${Math.min(...product.variants.map((v) => v.price)).toFixed(2)} - ₹${Math.max(...product.variants.map((v) => v.price)).toFixed(2)}`
+                              : `₹${product.price?.toFixed(2)}`}
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex flex-col">
-                              <span
-                                className={`text-sm font-black ${product.stock < 10 ? "text-rose-600" : "text-gray-900"}`}
-                              >
-                                {product.stock} units
-                              </span>
-                              <div className="mt-1.5 h-1.5 w-24 overflow-hidden rounded-full bg-gray-100">
-                                <div
-                                  className={`h-full rounded-full transition-all duration-1000 ${product.stock < 10 ? "bg-rose-500" : "bg-emerald-500"}`}
-                                  style={{
-                                    width: `${Math.min(product.stock * 2, 100)}%`,
-                                  }}
-                                />
-                              </div>
-                            </div>
-                            {product.stock < 10 && (
-                              <div className="animate-pulse flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700">
-                                <AlertTriangle className="h-3 w-3" /> CRITICAL
-                              </div>
-                            )}
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`h-2.5 w-2.5 rounded-full ${
+                                product.stock < 10
+                                  ? "bg-rose-500 animate-pulse"
+                                  : "bg-emerald-500"
+                              }`}
+                            />
+                            <span className="font-bold text-gray-900">
+                              {product.stock} units
+                            </span>
                           </div>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end gap-2 opacity-40 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center justify-end gap-2">
                             {(!product.variants ||
                               product.variants.length === 0) && (
                               <>
@@ -593,16 +585,25 @@ const Inventory = () => {
                                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
                                           Variant SKU
                                         </span>
-                                        <span className="font-mono text-xs text-gray-500 uppercase">
-                                          {v.sku}
-                                        </span>
+                                        <div className="flex items-center gap-1.5 mt-0.5">
+                                          <span className="font-mono text-xs text-gray-500 uppercase">
+                                            {v.sku}
+                                          </span>
+                                          <button
+                                            onClick={() => setBarcodeModal({ sku: v.sku, title: `${product.name} (${formatVariantTitle(v)})`, price: v.price })}
+                                            className="p-0.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors cursor-pointer"
+                                            title="Barcode"
+                                          >
+                                            <BarcodeIcon className="h-3 w-3" />
+                                          </button>
+                                        </div>
                                       </div>
                                       <div className="flex flex-col min-w-[100px]">
                                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
                                           Price
                                         </span>
                                         <span className="font-black text-gray-900">
-                                          ${v.price.toFixed(2)}
+                                          ₹{v.price.toFixed(2)}
                                         </span>
                                       </div>
                                       <div className="flex flex-col min-w-[120px]">
@@ -626,7 +627,7 @@ const Inventory = () => {
                                           )
                                         }
                                         className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors border border-emerald-100 bg-white shadow-sm"
-                                        title="Add 5 units"
+                                        title="Add 10 units"
                                       >
                                         <TrendingUp className="h-4 w-4" />
                                       </button>
@@ -639,7 +640,7 @@ const Inventory = () => {
                                           )
                                         }
                                         className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-rose-100 bg-white shadow-sm"
-                                        title="Remove 5 units"
+                                        title="Remove 10 units"
                                       >
                                         <TrendingDown className="h-4 w-4" />
                                       </button>
@@ -683,7 +684,7 @@ const Inventory = () => {
           <div className="bg-white w-full max-w-lg rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
             <div className="flex items-center justify-between mb-8">
               <h3 className="text-2xl font-black text-gray-900">
-                Register Product
+                New Product Listing
               </h3>
               <button
                 onClick={() => setShowAddModal(false)}
@@ -733,7 +734,7 @@ const Inventory = () => {
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Base Price ($)
+                  Base Price (₹)
                 </label>
                 <input
                   type="number"
@@ -746,31 +747,15 @@ const Inventory = () => {
                       price: e.target.value,
                     })
                   }
-                  placeholder="0.00"
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Description
-                </label>
-                <textarea
-                  className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none min-h-[100px] text-sm text-gray-900"
-                  value={newProduct.description}
-                  onChange={(e) =>
-                    setNewProduct({
-                      ...newProduct,
-                      description: e.target.value,
-                    })
-                  }
                 />
               </div>
 
-              {/* Variants Section */}
-              <div className="space-y-4 rounded-2xl bg-gray-50 p-4 border border-gray-100">
+              {/* Variant Combinations Option */}
+              <div className="space-y-2 pt-2 border-t border-gray-100">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <Layers className="h-4 w-4 text-primary-600" /> Variant Combinations
-                  </h4>
+                  <label className="text-[10px] font-black text-gray-900 uppercase tracking-wider">
+                    Product Variants ({newProduct.variants.length})
+                  </label>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -906,6 +891,18 @@ const Inventory = () => {
                           <span className="text-[10px] font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1">
                             <Layers className="h-3 w-3 text-indigo-500" /> {formatVariantTitle(variant)}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setNewProduct({
+                                ...newProduct,
+                                variants: newProduct.variants.filter((_, i) => i !== idx),
+                              })
+                            }
+                            className="text-rose-500 hover:text-rose-700 text-xs font-bold p-1"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
                         </div>
 
                         <div className="grid grid-cols-3 gap-2 items-end">
@@ -936,7 +933,7 @@ const Inventory = () => {
                             />
                           </div>
                           <div>
-                            <label className="text-[9px] font-bold text-gray-400 uppercase">Price ($)</label>
+                            <label className="text-[9px] font-bold text-gray-400 uppercase">Price (₹)</label>
                             <input
                               type="number"
                               step="0.01"
@@ -964,26 +961,32 @@ const Inventory = () => {
                             />
                           </div>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const v = newProduct.variants.filter((_, i) => i !== idx);
-                            setNewProduct({ ...newProduct, variants: v });
-                          }}
-                          className="absolute -top-1 -right-1 p-1 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                        >
-                          <X className="h-2 w-2" />
-                        </button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
 
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
+                  Description
+                </label>
+                <textarea
+                  rows="3"
+                  className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-medium text-gray-900"
+                  value={newProduct.description}
+                  onChange={(e) =>
+                    setNewProduct({
+                      ...newProduct,
+                      description: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Product Images (Max 4)
+                  Product Images
                 </label>
                 <div className="grid grid-cols-4 gap-2">
                   {selectedFiles.map((file, idx) => (
@@ -993,8 +996,8 @@ const Inventory = () => {
                     >
                       <img
                         src={URL.createObjectURL(file)}
+                        alt="upload-preview"
                         className="w-full h-full object-cover"
-                        alt="preview"
                       />
                       <button
                         onClick={() =>
@@ -1008,26 +1011,22 @@ const Inventory = () => {
                       </button>
                     </div>
                   ))}
-                  {selectedFiles.length < 4 && (
-                    <label className="aspect-square rounded-xl bg-gray-50 border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
-                      <Upload className="h-5 w-5 text-gray-400" />
-                      <span className="text-[10px] font-bold text-gray-400 mt-1">
-                        Add
-                      </span>
-                      <input
-                        type="file"
-                        className="hidden"
-                        multiple
-                        accept="image/*"
-                        onChange={(e) => {
-                          const files = Array.from(e.target.files);
-                          setSelectedFiles((prev) =>
-                            [...prev, ...files].slice(0, 4),
-                          );
-                        }}
-                      />
-                    </label>
-                  )}
+                  <label className="aspect-square rounded-xl bg-gray-50 border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
+                    <Upload className="h-5 w-5 text-gray-400" />
+                    <span className="text-[10px] font-bold text-gray-400 mt-1">
+                      Add
+                    </span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      multiple
+                      accept="image/*"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files);
+                        setSelectedFiles((prev) => [...prev, ...files]);
+                      }}
+                    />
+                  </label>
                 </div>
               </div>
             </div>
@@ -1113,7 +1112,7 @@ const Inventory = () => {
               </div>
               <div className="space-y-1">
                 <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Base Price ($)
+                  Base Price (₹)
                 </label>
                 <input
                   type="number"
@@ -1128,28 +1127,13 @@ const Inventory = () => {
                   }
                 />
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Description
-                </label>
-                <textarea
-                  className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none min-h-[100px] text-sm text-gray-900"
-                  value={editProduct.description}
-                  onChange={(e) =>
-                    setEditProduct({
-                      ...editProduct,
-                      description: e.target.value,
-                    })
-                  }
-                />
-              </div>
 
-              {/* Variants Section */}
-              <div className="space-y-4 rounded-2xl bg-gray-50 p-4 border border-gray-100">
+              {/* Edit Variant Combinations Section */}
+              <div className="space-y-2 pt-2 border-t border-gray-100">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
-                    <Layers className="h-4 w-4 text-primary-600" /> Variant Combinations
-                  </h4>
+                  <label className="text-[10px] font-black text-gray-900 uppercase tracking-wider">
+                    Product Variants ({editProduct.variants?.length || 0})
+                  </label>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -1285,6 +1269,18 @@ const Inventory = () => {
                           <span className="text-[10px] font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1">
                             <Layers className="h-3 w-3 text-indigo-500" /> {formatVariantTitle(variant)}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditProduct({
+                                ...editProduct,
+                                variants: editProduct.variants.filter((_, i) => i !== idx),
+                              })
+                            }
+                            className="text-rose-500 hover:text-rose-700 text-xs font-bold p-1"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
                         </div>
 
                         <div className="grid grid-cols-3 gap-2 items-end">
@@ -1315,7 +1311,7 @@ const Inventory = () => {
                             />
                           </div>
                           <div>
-                            <label className="text-[9px] font-bold text-gray-400 uppercase">Price ($)</label>
+                            <label className="text-[9px] font-bold text-gray-400 uppercase">Price (₹)</label>
                             <input
                               type="number"
                               step="0.01"
@@ -1343,37 +1339,43 @@ const Inventory = () => {
                             />
                           </div>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const v = editProduct.variants.filter((_, i) => i !== idx);
-                            setEditProduct({ ...editProduct, variants: v });
-                          }}
-                          className="absolute -top-1 -right-1 p-1 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                        >
-                          <X className="h-2 w-2" />
-                        </button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
 
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
+                  Description
+                </label>
+                <textarea
+                  rows="3"
+                  className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-medium text-gray-900"
+                  value={editProduct.description || ""}
+                  onChange={(e) =>
+                    setEditProduct({
+                      ...editProduct,
+                      description: e.target.value,
+                    })
+                  }
+                />
+              </div>
+
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Product Images (Current & New)
+                  Product Images
                 </label>
                 <div className="grid grid-cols-4 gap-2">
-                  {editProduct.images?.map((img, idx) => (
+                  {(editProduct.images || []).map((img, idx) => (
                     <div
-                      key={`current-${idx}`}
+                      key={`existing-${idx}`}
                       className="relative aspect-square rounded-xl bg-gray-100 overflow-hidden group"
                     >
                       <img
                         src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${img}`}
+                        alt="product"
                         className="w-full h-full object-cover"
-                        alt="current"
                       />
                       <button
                         onClick={() =>
@@ -1393,12 +1395,12 @@ const Inventory = () => {
                   {selectedFiles.map((file, idx) => (
                     <div
                       key={`new-${idx}`}
-                      className="relative aspect-square rounded-xl bg-gray-100 overflow-hidden group border-2 border-emerald-500"
+                      className="relative aspect-square rounded-xl bg-gray-100 overflow-hidden group border-2 border-primary-500"
                     >
                       <img
                         src={URL.createObjectURL(file)}
+                        alt="upload-preview"
                         className="w-full h-full object-cover"
-                        alt="preview"
                       />
                       <button
                         onClick={() =>
@@ -1412,30 +1414,22 @@ const Inventory = () => {
                       </button>
                     </div>
                   ))}
-                  {(editProduct.images?.length || 0) + selectedFiles.length <
-                    4 && (
-                    <label className="aspect-square rounded-xl bg-gray-50 border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
-                      <Upload className="h-5 w-5 text-gray-400" />
-                      <span className="text-[10px] font-bold text-gray-400 mt-1">
-                        Add
-                      </span>
-                      <input
-                        type="file"
-                        className="hidden"
-                        multiple
-                        accept="image/*"
-                        onChange={(e) => {
-                          const files = Array.from(e.target.files);
-                          setSelectedFiles((prev) =>
-                            [...prev, ...files].slice(
-                              0,
-                              4 - (editProduct.images?.length || 0),
-                            ),
-                          );
-                        }}
-                      />
-                    </label>
-                  )}
+                  <label className="aspect-square rounded-xl bg-gray-50 border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:bg-gray-100 transition-colors">
+                    <Upload className="h-5 w-5 text-gray-400" />
+                    <span className="text-[10px] font-bold text-gray-400 mt-1">
+                      Add
+                    </span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      multiple
+                      accept="image/*"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files);
+                        setSelectedFiles((prev) => [...prev, ...files]);
+                      }}
+                    />
+                  </label>
                 </div>
               </div>
             </div>
@@ -1445,7 +1439,7 @@ const Inventory = () => {
                 onClick={() => setShowEditModal(false)}
                 className="flex-1 py-4 text-gray-400 font-bold hover:text-gray-600 transition-colors"
               >
-                Cancel
+                Discard
               </button>
               <button
                 onClick={handleUpdateProduct}
@@ -1516,12 +1510,19 @@ const Inventory = () => {
       )}
 
       {/* BARCODE MODAL */}
-      {barcodeModal && (
+      {barcodeModal ? (
         <BarcodeModal
           sku={barcodeModal.sku}
           title={barcodeModal.title}
           price={barcodeModal.price}
           onClose={() => setBarcodeModal(null)}
+        />
+      ) : (
+        <BarcodeModal
+          isOpen={barcodeModalOpen}
+          onClose={() => setBarcodeModalOpen(false)}
+          sku={barcodeSku}
+          productName={barcodeName}
         />
       )}
     </div>

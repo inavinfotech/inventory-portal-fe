@@ -10,8 +10,9 @@ import {
   AlertTriangle,
   History,
   Info,
-  DollarSign,
+  IndianRupee,
   Activity,
+  Settings2,
   Image as ImageIcon,
   Plus,
   Sparkles,
@@ -20,10 +21,10 @@ import {
   Edit3,
   Save,
   X,
-  Settings2,
   Loader2,
   Check,
   Barcode,
+  Barcode as BarcodeIcon,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
 import { generateVariantSku, sanitizeSkuInput } from "../utils/skuGenerator";
@@ -51,6 +52,19 @@ const ProductDetailPage = () => {
   const [adjustingVariant, setAdjustingVariant] = useState(null);
   const [adjustQty, setAdjustQty] = useState("");
   const [barcodeModal, setBarcodeModal] = useState(null);
+  const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
+  const [barcodeSku, setBarcodeSku] = useState("");
+  const [barcodeName, setBarcodeName] = useState("");
+  const [zoomedImage, setZoomedImage] = useState(null);
+  const [selectedVariant, setSelectedVariant] = useState(null);
+  const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
+  const [adjustmentAmount, setAdjustmentAmount] = useState("");
+
+  const openBarcodeModal = (sku, name) => {
+    setBarcodeSku(sku);
+    setBarcodeName(name);
+    setBarcodeModalOpen(true);
+  };
 
   useEffect(() => {
     fetchProductDetails();
@@ -60,11 +74,12 @@ const ProductDetailPage = () => {
   const fetchProductDetails = async () => {
     try {
       setLoading(true);
-      const response = await inventoryService.getProduct(productId);
-      setProduct(response.data);
-      setVariants(response.data.variants || []);
+      const res = await inventoryService.getProductById(productId);
+      setProduct(res.data);
+      setVariants(res.data.variants || []);
+      setError(null);
     } catch (err) {
-      setError("Failed to fetch product details.");
+      setError("Failed to load product details: " + (err.response?.data?.detail || err.message));
     } finally {
       setLoading(false);
     }
@@ -73,13 +88,10 @@ const ProductDetailPage = () => {
   const fetchProductMovements = async () => {
     try {
       setMovementsLoading(true);
-      const response = await inventoryService.getMovements({
-        product_id: productId,
-        limit: 10,
-      });
-      setMovements(response.data.items || []);
+      const res = await inventoryService.getMovements({ product_id: productId, limit: 20 });
+      setMovements(res.data.items || []);
     } catch (err) {
-      console.error("Failed to fetch movements", err);
+      console.error(err);
     } finally {
       setMovementsLoading(false);
     }
@@ -119,7 +131,6 @@ const ProductDetailPage = () => {
 
     const valueArrays = validNiches.map((n) => n.values);
     const combinations = cartesian(valueArrays);
-    const prefix = baseSku ? baseSku.trim().toUpperCase() : "PROD";
 
     return combinations.map((combo) => {
       const attributes = {};
@@ -143,26 +154,19 @@ const ProductDetailPage = () => {
   const handleSaveVariants = async () => {
     try {
       setIsSaving(true);
-      const { id, stock, created_at, updated_at, ...productData } = product;
-
-      await inventoryService.updateProduct(product.id, {
-        ...productData,
-        price: parseFloat(productData.price),
+      const payload = {
+        ...product,
         variants: variants.map((v) => ({
-          id: v.id || undefined,
-          sku: v.sku,
-          size: v.size || (v.attributes?.Size || v.attributes?.size || null),
-          color: v.color || (v.attributes?.Color || v.attributes?.color || null),
-          weight: v.weight || (v.attributes?.Weight || v.attributes?.weight || null),
-          attributes: v.attributes || null,
+          ...v,
           price: parseFloat(v.price || product.price),
-          stock: parseInt(v.stock || 0) || 0,
+          stock: parseInt(v.stock || 0),
         })),
-      });
+      };
 
+      await inventoryService.updateProduct(product.id, payload);
       await fetchProductDetails();
-      await fetchProductMovements();
-      alert("Variants saved successfully!");
+      window.dispatchEvent(new Event("stock-updated"));
+      alert("Variants updated successfully!");
     } catch (err) {
       alert("Failed to save variants: " + (err.response?.data?.detail || err.message));
     } finally {
@@ -172,21 +176,22 @@ const ProductDetailPage = () => {
 
   const handleVariantStockChange = async (variantId, delta) => {
     try {
-      const currentVariant = variants.find((v) => v.id === variantId);
-      if (!currentVariant) return;
-      const newStock = Math.max(0, (currentVariant.stock || 0) + delta);
-
-      await inventoryService.updateStock(product.id, newStock, variantId);
-      await inventoryService.addMovement({
-        product_id: product.id,
-        variant_id: variantId,
-        type: delta > 0 ? "IN" : "OUT",
-        quantity: Math.abs(delta),
-        reference_id: "in_page_variant_adjust",
-      });
-
+      if (delta > 0) {
+        await inventoryService.addStock({
+          product_id: product.id,
+          variant_id: variantId,
+          quantity: delta,
+        });
+      } else {
+        await inventoryService.removeStock({
+          product_id: product.id,
+          variant_id: variantId,
+          quantity: Math.abs(delta),
+        });
+      }
       await fetchProductDetails();
       await fetchProductMovements();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert("Stock update failed: " + (err.response?.data?.detail || err.message));
     }
@@ -196,7 +201,7 @@ const ProductDetailPage = () => {
     if (!adjustingVariant) return;
     const amount = parseInt(adjustQty);
     if (isNaN(amount) || amount < 0) {
-      alert("Please enter a valid non-negative stock quantity");
+      alert("Please enter a valid stock quantity");
       return;
     }
 
@@ -214,6 +219,7 @@ const ProductDetailPage = () => {
       setAdjustQty("");
       await fetchProductDetails();
       await fetchProductMovements();
+      window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
       alert("Adjustment failed: " + (err.response?.data?.detail || err.message));
     }
@@ -300,33 +306,33 @@ const ProductDetailPage = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard
           icon={<Warehouse className="text-blue-500" />}
-          label="Total Inventory"
+          label="Available Inventory"
           value={product.stock}
           suffix="Units"
-          description="Total quantities in stock"
+          description="Physical stock on shelf"
           color="blue"
         />
         <StatCard
-          icon={<AlertTriangle className="text-amber-500" />}
-          label="Reserved Quantity"
-          value={product.reserved}
+          icon={<Package className="text-amber-500" />}
+          label="Active Reservations"
+          value={product.reserved || 0}
           suffix="Units"
-          description="Awaiting fulfillment"
+          description="Locked in pending orders"
           color="amber"
-          warning={product.reserved > 0}
+          warning={(product.reserved || 0) > 0}
         />
         <StatCard
           icon={<TrendingUp className="text-emerald-500" />}
-          label="Available Sellable"
-          value={product.stock - product.reserved}
+          label="Net Available"
+          value={product.stock - (product.reserved || 0)}
           suffix="Units"
-          description="Ready for sale"
+          description="Ready for new orders"
           color="emerald"
         />
         <StatCard
-          icon={<DollarSign className="text-indigo-500" />}
-          label="Unit Valuation"
-          value={`$${product.price.toLocaleString()}`}
+          icon={<IndianRupee className="text-indigo-500" />}
+          label="Retail Unit Price"
+          value={`₹${product.price?.toFixed(2)}`}
           description="Base listing price"
           color="indigo"
         />
@@ -335,7 +341,31 @@ const ProductDetailPage = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left Column: Product Info & In-Page Variant Management */}
         <div className="lg:col-span-2 space-y-8">
-          {/* Product Description Header */}
+          {/* Main Product Visual Showcase */}
+          {product.images?.length > 0 && (
+            <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden p-6 space-y-4">
+              <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
+                <ImageIcon className="h-4 w-4 text-primary-500" /> Catalog Showcase ({product.images.length})
+              </h3>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {product.images.map((imgUrl, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => setZoomedImage(`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${imgUrl}`)}
+                    className="aspect-square rounded-2xl bg-gray-50 border border-gray-100 overflow-hidden cursor-zoom-in group relative"
+                  >
+                    <img
+                      src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${imgUrl}`}
+                      alt={`Product asset ${idx + 1}`}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Catalog Description */}
           <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden p-8">
             <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4 flex items-center gap-2">
               <Info className="h-4 w-4 text-primary-500" /> Catalog Description
@@ -600,10 +630,10 @@ const ProductDetailPage = () => {
                           {/* Price Column */}
                           <div className="lg:col-span-3">
                             <label className="block text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">
-                              Retail Price ($)
+                              Retail Price (₹)
                             </label>
                             <div className="relative">
-                              <span className="absolute left-3 top-2 text-gray-400 font-bold">$</span>
+                              <span className="absolute left-3 top-2 text-gray-400 font-bold">₹</span>
                               <input
                                 type="number"
                                 step="0.01"
@@ -701,125 +731,68 @@ const ProductDetailPage = () => {
               )}
             </div>
           </section>
+        </div>
 
-          {/* Visual Assets (Images) */}
-          <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden p-8">
-            <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-6 flex items-center gap-2">
-              <ImageIcon className="h-4 w-4 text-blue-500" /> Attached Visual Assets
-            </h3>
-            {product.images?.length > 0 ? (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {product.images.map((img, idx) => (
+        {/* Right Column: Ledger Audit Trail */}
+        <div className="space-y-6">
+          <section className="bg-white rounded-3xl border border-gray-100 shadow-sm p-6 space-y-6">
+            <div className="flex items-center justify-between border-b border-gray-50 pb-4">
+              <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
+                <Activity className="h-4 w-4 text-indigo-500" /> Audit Trail (Movements)
+              </h3>
+              <span className="text-[10px] font-bold text-gray-400">
+                Recent 20
+              </span>
+            </div>
+
+            {movementsLoading ? (
+              <div className="py-8 text-center text-gray-400 font-medium text-xs">
+                Loading history...
+              </div>
+            ) : movements.length === 0 ? (
+              <div className="py-8 text-center text-gray-400 italic text-xs">
+                No movements recorded for this item yet.
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {movements.map((m) => (
                   <div
-                    key={idx}
-                    className="aspect-square rounded-2xl bg-gray-100 overflow-hidden border border-gray-100 shadow-inner group"
+                    key={m.id}
+                    className="flex items-start gap-3 p-3 rounded-2xl bg-gray-50/50 border border-gray-100/50 hover:bg-gray-50 transition-colors"
                   >
-                    <img
-                      src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${img}`}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
-                      alt={`View ${idx + 1}`}
-                    />
+                    <div
+                      className={`p-2 rounded-xl mt-0.5 ${
+                        m.type === "IN"
+                          ? "bg-emerald-50 text-emerald-600"
+                          : "bg-rose-50 text-rose-600"
+                      }`}
+                    >
+                      {m.type === "IN" ? (
+                        <TrendingUp className="h-3.5 w-3.5" />
+                      ) : (
+                        <TrendingDown className="h-3.5 w-3.5" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-gray-900 truncate">
+                          {m.type === "IN" ? "+" : "-"}{m.quantity} Units
+                        </span>
+                        <span className="text-[9px] font-mono text-gray-400">
+                          {new Date(m.created_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-gray-500 font-medium mt-0.5 truncate">
+                        Ref: {m.reference_id || "Direct Adjust"}
+                      </p>
+                    </div>
                   </div>
                 ))}
               </div>
-            ) : (
-              <div className="py-12 flex flex-col items-center justify-center bg-gray-50 rounded-2xl border border-dashed border-gray-200 opacity-60">
-                <ImageIcon className="h-12 w-12 text-gray-300 mb-2" />
-                <p className="text-xs text-gray-400 font-bold uppercase tracking-widest">
-                  No Assets Registered
-                </p>
-              </div>
             )}
-          </section>
-        </div>
-
-        {/* Right Column: Activity / Movements */}
-        <div className="space-y-8">
-          <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden h-full flex flex-col">
-            <div className="px-8 py-6 border-b border-gray-50 bg-gray-50/50 flex items-center justify-between shrink-0">
-              <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                <Activity className="h-4 w-4 text-emerald-500" /> Recent Activity
-              </h3>
-            </div>
-            <div className="p-0 overflow-y-auto max-h-[600px] flex-1">
-              {movementsLoading ? (
-                <div className="p-12 text-center">
-                  <div className="w-8 h-8 border-3 border-gray-900 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                </div>
-              ) : movements.length > 0 ? (
-                <div className="divide-y divide-gray-50">
-                  {movements.map((move) => (
-                    <div
-                      key={move.id}
-                      className="p-6 hover:bg-gray-50/50 transition-colors"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex items-start gap-4">
-                          <div
-                            className={`mt-1 p-2 rounded-xl border ${
-                              move.type === "IN"
-                                ? "bg-emerald-50 border-emerald-100 text-emerald-600"
-                                : move.type === "OUT"
-                                  ? "bg-rose-50 border-rose-100 text-rose-600"
-                                  : "bg-blue-50 border-blue-100 text-blue-600"
-                            }`}
-                          >
-                            {move.type === "IN" ? (
-                              <TrendingUp size={14} />
-                            ) : move.type === "OUT" ? (
-                              <TrendingDown size={14} />
-                            ) : (
-                              <AlertTriangle size={14} />
-                            )}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2 mb-0.5">
-                              <span className="font-bold text-gray-900 text-sm">
-                                {move.type === "IN" ? "+" : ""}
-                                {move.quantity} Units
-                              </span>
-                              <span
-                                className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
-                                  move.type === "IN"
-                                    ? "bg-emerald-100 text-emerald-700"
-                                    : move.type === "OUT"
-                                      ? "bg-rose-100 text-rose-700"
-                                      : "bg-blue-100 text-blue-700"
-                                }`}
-                              >
-                                {move.type}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-gray-400 font-medium">
-                              Ref: {move.reference_id || "manual"}
-                            </p>
-                            <div className="mt-2 flex items-center gap-1.5 text-[9px] text-gray-400 font-bold uppercase tracking-widest">
-                              <Clock size={10} />{" "}
-                              {new Date(move.created_at).toLocaleString()}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-12 text-center text-gray-400 italic flex flex-col items-center">
-                  <Package className="h-10 w-10 mb-4 opacity-20" />
-                  <p className="text-xs font-bold uppercase tracking-widest opacity-60">
-                    No movements recorded
-                  </p>
-                </div>
-              )}
-            </div>
-            <div className="p-6 bg-gray-50/50 border-t border-gray-100 shrink-0">
-              <button
-                onClick={() => navigate("/movements")}
-                className="w-full text-center text-[10px] font-black text-gray-400 uppercase tracking-widest hover:text-gray-900 transition-colors"
-              >
-                View Ledger Statistics
-              </button>
-            </div>
           </section>
         </div>
       </div>
@@ -875,13 +848,36 @@ const ProductDetailPage = () => {
       )}
 
       {/* BARCODE MODAL */}
-      {barcodeModal && (
+      {barcodeModal ? (
         <BarcodeModal
           sku={barcodeModal.sku}
           title={barcodeModal.title}
           price={barcodeModal.price}
           onClose={() => setBarcodeModal(null)}
         />
+      ) : (
+        <BarcodeModal
+          isOpen={barcodeModalOpen}
+          onClose={() => setBarcodeModalOpen(false)}
+          sku={barcodeSku}
+          productName={barcodeName}
+        />
+      )}
+
+      {/* Image Preview Modal */}
+      {zoomedImage && (
+        <div
+          className="fixed inset-0 z-70 flex items-center justify-center bg-gray-900/80 backdrop-blur-md p-4 animate-in fade-in duration-200 cursor-zoom-out"
+          onClick={() => setZoomedImage(null)}
+        >
+          <div className="max-w-4xl max-h-[85vh] rounded-3xl overflow-hidden shadow-2xl relative">
+            <img
+              src={zoomedImage}
+              alt="Zoomed product showcase"
+              className="w-full h-full object-contain"
+            />
+          </div>
+        </div>
       )}
     </div>
   );

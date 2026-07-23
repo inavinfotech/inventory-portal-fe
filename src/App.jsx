@@ -10,6 +10,7 @@ import ProductDetailPage from "./pages/ProductDetailPage";
 
 import Login from "./pages/Login";
 import ProtectedRoute from "./components/ProtectedRoute";
+import DevLock from "./components/DevLock";
 
 function App() {
   return (
@@ -30,7 +31,14 @@ function App() {
                   />
                   <Route path="/movements" element={<Movements />} />
                   <Route path="/reservations" element={<Reservations />} />
-                  <Route path="/settings" element={<Settings />} />
+                  <Route
+                    path="/settings"
+                    element={
+                      <DevLock>
+                        <Settings />
+                      </DevLock>
+                    }
+                  />
                   <Route
                     path="/"
                     element={<Navigate to="/dashboard" replace />}
