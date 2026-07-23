@@ -13,8 +13,21 @@ import {
   DollarSign,
   Activity,
   Image as ImageIcon,
+  Plus,
+  Sparkles,
+  Layers,
+  Trash2,
+  Edit3,
+  Save,
+  X,
+  Settings2,
+  Loader2,
+  Check,
+  Barcode,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
+import { generateVariantSku, sanitizeSkuInput } from "../utils/skuGenerator";
+import BarcodeModal from "../components/BarcodeModal";
 
 const ProductDetailPage = () => {
   const { productId } = useParams();
@@ -24,6 +37,20 @@ const ProductDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [movementsLoading, setMovementsLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // In-Page Variant Management State
+  const [variants, setVariants] = useState([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [showGen, setShowGen] = useState(false);
+  const [optionNiches, setOptionNiches] = useState([
+    { name: "Size", values: "Small, Medium, Large" },
+    { name: "Color", values: "Red, Green, Blue" },
+  ]);
+
+  // Quick Adjustment Modal State
+  const [adjustingVariant, setAdjustingVariant] = useState(null);
+  const [adjustQty, setAdjustQty] = useState("");
+  const [barcodeModal, setBarcodeModal] = useState(null);
 
   useEffect(() => {
     fetchProductDetails();
@@ -35,6 +62,7 @@ const ProductDetailPage = () => {
       setLoading(true);
       const response = await inventoryService.getProduct(productId);
       setProduct(response.data);
+      setVariants(response.data.variants || []);
     } catch (err) {
       setError("Failed to fetch product details.");
     } finally {
@@ -54,6 +82,140 @@ const ProductDetailPage = () => {
       console.error("Failed to fetch movements", err);
     } finally {
       setMovementsLoading(false);
+    }
+  };
+
+  const formatVariantTitle = (v) => {
+    if (!v) return "Standard Item";
+    const parts = [];
+    if (v.attributes && typeof v.attributes === "object" && Object.keys(v.attributes).length > 0) {
+      Object.entries(v.attributes).forEach(([k, val]) => {
+        if (val) parts.push(`${k}: ${val}`);
+      });
+    }
+    if (parts.length === 0) {
+      if (v.size) parts.push(`Size: ${v.size}`);
+      if (v.color) parts.push(`Color: ${v.color}`);
+      if (v.weight) parts.push(`Weight: ${v.weight}`);
+    }
+    return parts.length > 0 ? parts.join(" / ") : (v.sku || "Variant");
+  };
+
+  const generateDynamicCombinations = (niches, baseSku, basePrice) => {
+    const validNiches = niches
+      .map((n) => ({
+        name: n.name.trim(),
+        values: n.values.split(",").map((v) => v.trim()).filter(Boolean),
+      }))
+      .filter((n) => n.name && n.values.length > 0);
+
+    if (validNiches.length === 0) return [];
+
+    const cartesian = (arrays) =>
+      arrays.reduce(
+        (a, b) => a.flatMap((d) => b.map((e) => [...d, e])),
+        [[]]
+      );
+
+    const valueArrays = validNiches.map((n) => n.values);
+    const combinations = cartesian(valueArrays);
+    const prefix = baseSku ? baseSku.trim().toUpperCase() : "PROD";
+
+    return combinations.map((combo) => {
+      const attributes = {};
+      combo.forEach((val, idx) => {
+        const nicheName = validNiches[idx].name;
+        attributes[nicheName] = val;
+      });
+
+      return {
+        attributes,
+        size: attributes["Size"] || attributes["size"] || "",
+        color: attributes["Color"] || attributes["color"] || "",
+        weight: attributes["Weight"] || attributes["weight"] || "",
+        sku: generateVariantSku(baseSku, attributes),
+        price: basePrice || "0",
+        stock: 0,
+      };
+    });
+  };
+
+  const handleSaveVariants = async () => {
+    try {
+      setIsSaving(true);
+      const { id, stock, created_at, updated_at, ...productData } = product;
+
+      await inventoryService.updateProduct(product.id, {
+        ...productData,
+        price: parseFloat(productData.price),
+        variants: variants.map((v) => ({
+          id: v.id || undefined,
+          sku: v.sku,
+          size: v.size || (v.attributes?.Size || v.attributes?.size || null),
+          color: v.color || (v.attributes?.Color || v.attributes?.color || null),
+          weight: v.weight || (v.attributes?.Weight || v.attributes?.weight || null),
+          attributes: v.attributes || null,
+          price: parseFloat(v.price || product.price),
+          stock: parseInt(v.stock || 0) || 0,
+        })),
+      });
+
+      await fetchProductDetails();
+      await fetchProductMovements();
+      alert("Variants saved successfully!");
+    } catch (err) {
+      alert("Failed to save variants: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleVariantStockChange = async (variantId, delta) => {
+    try {
+      const currentVariant = variants.find((v) => v.id === variantId);
+      if (!currentVariant) return;
+      const newStock = Math.max(0, (currentVariant.stock || 0) + delta);
+
+      await inventoryService.updateStock(product.id, newStock, variantId);
+      await inventoryService.addMovement({
+        product_id: product.id,
+        variant_id: variantId,
+        type: delta > 0 ? "IN" : "OUT",
+        quantity: Math.abs(delta),
+        reference_id: "in_page_variant_adjust",
+      });
+
+      await fetchProductDetails();
+      await fetchProductMovements();
+    } catch (err) {
+      alert("Stock update failed: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleApplyManualAdjustment = async () => {
+    if (!adjustingVariant) return;
+    const amount = parseInt(adjustQty);
+    if (isNaN(amount) || amount < 0) {
+      alert("Please enter a valid non-negative stock quantity");
+      return;
+    }
+
+    try {
+      await inventoryService.updateStock(product.id, amount, adjustingVariant.id);
+      await inventoryService.addMovement({
+        product_id: product.id,
+        variant_id: adjustingVariant.id,
+        type: amount > adjustingVariant.stock ? "IN" : "OUT",
+        quantity: Math.abs(amount - adjustingVariant.stock),
+        reference_id: "in_page_manual_adjust",
+      });
+
+      setAdjustingVariant(null);
+      setAdjustQty("");
+      await fetchProductDetails();
+      await fetchProductMovements();
+    } catch (err) {
+      alert("Adjustment failed: " + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -118,6 +280,13 @@ const ProductDetailPage = () => {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setBarcodeModal({ sku: product.sku, title: product.name, price: product.price })}
+            className="inline-flex items-center gap-2 px-5 py-3 bg-indigo-50 text-indigo-700 border border-indigo-100/80 rounded-2xl text-sm font-bold hover:bg-indigo-100 transition-all shadow-xs"
+          >
+            <Barcode className="h-4 w-4" /> Barcode
+          </button>
           <Link
             to="/movements"
             className="inline-flex items-center gap-2 px-6 py-3 bg-white border border-gray-100 rounded-2xl text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 transition-all"
@@ -164,83 +333,369 @@ const ProductDetailPage = () => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Left Column: Product Info & Variants */}
+        {/* Left Column: Product Info & In-Page Variant Management */}
         <div className="lg:col-span-2 space-y-8">
-          {/* Detailed Info */}
-          <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-8 py-6 border-b border-gray-50 bg-gray-50/50 flex items-center justify-between">
-              <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                <Info className="h-4 w-4 text-primary-500" /> Specifications &
-                Variants
-              </h3>
-            </div>
-            <div className="p-8">
-              <p className="text-gray-600 mb-8 leading-relaxed italic border-l-4 border-gray-100 pl-6">
-                {product.description ||
-                  "No description provided for this catalog item."}
-              </p>
+          {/* Product Description Header */}
+          <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden p-8">
+            <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <Info className="h-4 w-4 text-primary-500" /> Catalog Description
+            </h3>
+            <p className="text-gray-600 leading-relaxed italic border-l-4 border-gray-100 pl-6">
+              {product.description || "No description provided for this catalog item."}
+            </p>
+          </section>
 
-              {product.variants?.length > 0 ? (
-                <div className="space-y-4">
-                  <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">
-                    Available Variants
-                  </h4>
-                  {product.variants.map((v) => (
-                    <div
-                      key={v.id}
-                      className="group p-5 rounded-2xl bg-gray-50 border border-transparent hover:border-gray-200 hover:bg-white transition-all shadow-sm"
+          {/* IN-PAGE VARIANT MANAGEMENT SECTION */}
+          <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className="px-6 py-5 border-b border-gray-50 bg-gray-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-primary-500" /> Variant Combinations & Inventory Control
+                </h3>
+                <p className="text-xs text-gray-400 font-medium mt-0.5">
+                  Manage option niches, SKUs, prices, and stock levels directly on this page.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowGen(!showGen)}
+                  className="px-3 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-indigo-100 shadow-xs"
+                >
+                  <Sparkles className="h-3.5 w-3.5" /> Option Niches Generator
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setVariants([
+                      ...variants,
+                      {
+                        attributes: {},
+                        sku: generateVariantSku(product.sku, {}),
+                        price: product.price,
+                        stock: 0,
+                      },
+                    ])
+                  }
+                  className="px-3 py-2 bg-gray-100 text-gray-800 hover:bg-gray-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1 border border-gray-200"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Variant
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveVariants}
+                  disabled={isSaving}
+                  className="px-4 py-2 bg-gray-900 text-white hover:bg-black rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shadow-md disabled:opacity-50"
+                >
+                  {isSaving ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Save className="h-3.5 w-3.5" />
+                  )}
+                  Save Variants
+                </button>
+              </div>
+            </div>
+
+            <div className="p-8 space-y-6">
+              {/* Option Niches Matrix Generator */}
+              {showGen && (
+                <div className="p-5 bg-indigo-50/60 rounded-2xl border border-indigo-100 space-y-4 animate-in slide-in-from-top-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-black text-indigo-950 uppercase tracking-wider flex items-center gap-1.5">
+                        <Sparkles className="h-4 w-4 text-indigo-600" /> Dynamic Option Niches Generator
+                      </h4>
+                      <p className="text-[11px] text-indigo-700 font-medium">
+                        Define custom option niches (e.g. Size, Color, Storage) to auto-generate combination matrix.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setOptionNiches([...optionNiches, { name: "", values: "" }])}
+                      className="text-xs font-bold text-indigo-700 hover:text-indigo-900 bg-white px-3 py-1 rounded-xl border border-indigo-200 shadow-sm"
                     >
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-6 items-center">
-                        <div>
-                          <p className="text-[10px] font-black text-gray-400 uppercase mb-1">
-                            Weight / Type
-                          </p>
-                          <p className="font-bold text-gray-900">{v.weight}</p>
+                      + Add Niche
+                    </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    {optionNiches.map((niche, nIdx) => (
+                      <div key={nIdx} className="grid grid-cols-5 gap-3 items-center bg-white p-3 rounded-xl border border-indigo-100">
+                        <div className="col-span-2">
+                          <label className="text-[9px] font-black text-indigo-500 uppercase">Niche Name</label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Storage, Color, Size"
+                            className="w-full px-3 py-1.5 text-xs bg-gray-50 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-indigo-500/20 font-bold text-gray-900"
+                            value={niche.name}
+                            onChange={(e) => {
+                              const list = [...optionNiches];
+                              list[nIdx].name = e.target.value;
+                              setOptionNiches(list);
+                            }}
+                          />
                         </div>
-                        <div>
-                          <p className="text-[10px] font-black text-gray-400 uppercase mb-1">
-                            SKU
-                          </p>
-                          <p className="font-mono text-xs text-gray-500">
-                            {v.sku}
-                          </p>
+                        <div className="col-span-3 relative flex items-center gap-2">
+                          <div className="flex-1">
+                            <label className="text-[9px] font-black text-indigo-500 uppercase">Values (comma separated)</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. 128GB, 256GB or Red, Blue"
+                              className="w-full px-3 py-1.5 text-xs bg-gray-50 rounded-lg border border-gray-200 outline-none focus:ring-2 focus:ring-indigo-500/20 font-medium text-gray-900"
+                              value={niche.values}
+                              onChange={(e) => {
+                                const list = [...optionNiches];
+                                list[nIdx].values = e.target.value;
+                                setOptionNiches(list);
+                              }}
+                            />
+                          </div>
+                          {optionNiches.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setOptionNiches(optionNiches.filter((_, i) => i !== nIdx))}
+                              className="text-rose-500 hover:text-rose-700 p-1.5 mt-4 rounded-lg hover:bg-rose-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
                         </div>
-                        <div>
-                          <p className="text-[10px] font-black text-gray-400 uppercase mb-1">
-                            Retail Price
-                          </p>
-                          <p className="font-black text-gray-900">
-                            ${v.price.toLocaleString()}
-                          </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const combos = generateDynamicCombinations(optionNiches, product.sku, product.price);
+                        if (combos.length > 0) {
+                          setVariants([...variants, ...combos]);
+                          setShowGen(false);
+                        } else {
+                          alert("Please specify option niche names and values (comma separated).");
+                        }
+                      }}
+                      className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <Sparkles className="h-4 w-4" /> Generate Matrix Combinations
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowGen(false)}
+                      className="px-4 py-2.5 text-gray-500 hover:bg-gray-100 rounded-xl text-xs font-bold"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Variants Card-Based List Section */}
+              {variants.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-black text-gray-400 uppercase tracking-widest">
+                      Active Product Variants ({variants.length})
+                    </h4>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {variants.map((v, idx) => (
+                      <div
+                        key={v.id || idx}
+                        className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm hover:border-indigo-100 hover:shadow-md transition-all space-y-4 relative group"
+                      >
+                        {/* Header: Attribute Badges & Delete */}
+                        <div className="flex items-center justify-between border-b border-gray-50 pb-3 gap-2">
+                          <div className="flex flex-wrap gap-1.5 items-center">
+                            {v.attributes && typeof v.attributes === "object" && Object.keys(v.attributes).length > 0 ? (
+                              Object.entries(v.attributes).map(([key, val]) => (
+                                <span
+                                  key={key}
+                                  className="px-3 py-1 bg-indigo-50 text-indigo-700 font-bold text-xs rounded-xl border border-indigo-100/80 shadow-2xs flex items-center gap-1"
+                                >
+                                  <span className="text-indigo-400 font-normal">{key}:</span> {val}
+                                </span>
+                              ))
+                            ) : (
+                              <>
+                                {v.size && (
+                                  <span className="px-3 py-1 bg-blue-50 text-blue-700 font-bold text-xs rounded-xl border border-blue-100">
+                                    Size: {v.size}
+                                  </span>
+                                )}
+                                {v.color && (
+                                  <span className="px-3 py-1 bg-purple-50 text-purple-700 font-bold text-xs rounded-xl border border-purple-100">
+                                    Color: {v.color}
+                                  </span>
+                                )}
+                                {v.weight && (
+                                  <span className="px-3 py-1 bg-gray-100 text-gray-700 font-bold text-xs rounded-xl border border-gray-200">
+                                    Weight: {v.weight}
+                                  </span>
+                                )}
+                                {!v.size && !v.color && !v.weight && (
+                                  <span className="font-bold text-gray-500 text-xs px-3 py-1 bg-gray-50 rounded-xl">Standard Variant</span>
+                                )}
+                              </>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setBarcodeModal({ sku: v.sku, title: `${product.name} (${formatVariantTitle(v)})`, price: v.price })}
+                              className="px-2.5 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl transition-colors shrink-0 flex items-center gap-1 font-bold text-xs border border-indigo-100/60 shadow-2xs"
+                              title="View & Download Barcode"
+                            >
+                              <Barcode className="h-3.5 w-3.5" /> Barcode
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setVariants(variants.filter((_, i) => i !== idx))}
+                              className="p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors shrink-0"
+                              title="Delete Variant"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
-                        <div className="text-right flex flex-col items-end">
-                          <p className="text-[10px] font-black text-gray-400 uppercase mb-1">
-                            Inventory Status
-                          </p>
-                          <div className="flex items-center gap-3">
-                            <div className="text-right">
-                              <p className="font-black text-sm text-gray-900">
-                                {v.stock} in Stock
-                              </p>
-                              {v.reserved > 0 && (
-                                <p className="text-[10px] font-bold text-amber-600">
-                                  -{v.reserved} Reserved
-                                </p>
+
+                        {/* Body Grid: SKU (4 cols), Price (3 cols), Stock Controls (5 cols) */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-5 items-center">
+                          {/* SKU Column */}
+                          <div className="lg:col-span-4">
+                            <div className="flex items-center justify-between mb-1.5">
+                              <label className="block text-[10px] font-black text-gray-400 uppercase tracking-wider">
+                                SKU Identity
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const list = [...variants];
+                                  list[idx].sku = generateVariantSku(product.sku, v.attributes || {});
+                                  setVariants(list);
+                                }}
+                                className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5"
+                                title="Auto-Generate Variant SKU"
+                              >
+                                <Sparkles className="h-2.5 w-2.5" /> Auto SKU
+                              </button>
+                            </div>
+                            <input
+                              type="text"
+                              className="w-full px-3 py-2 text-xs bg-gray-50/80 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-gray-800"
+                              value={v.sku || ""}
+                              onChange={(e) => {
+                                const list = [...variants];
+                                list[idx].sku = sanitizeSkuInput(e.target.value);
+                                setVariants(list);
+                              }}
+                            />
+                          </div>
+
+                          {/* Price Column */}
+                          <div className="lg:col-span-3">
+                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">
+                              Retail Price ($)
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-3 top-2 text-gray-400 font-bold">$</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                className="w-full pl-7 pr-3 py-2 text-xs bg-gray-50/80 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-primary-500/20 outline-none font-black text-gray-900"
+                                value={v.price || ""}
+                                onChange={(e) => {
+                                  const list = [...variants];
+                                  list[idx].price = e.target.value;
+                                  setVariants(list);
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Stock & Quick Controls Column (Spacious 5 columns) */}
+                          <div className="lg:col-span-5">
+                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">
+                              Inventory Stock & Controls
+                            </label>
+                            <div className="flex flex-wrap items-center justify-between gap-2 bg-gray-50/80 p-2 rounded-xl border border-gray-200">
+                              <div className="pl-1 shrink-0">
+                                <span className="font-black text-sm text-gray-900">
+                                  {v.stock || 0}
+                                </span>
+                                <span className="text-[10px] text-gray-500 font-bold ml-1">Units</span>
+                                {v.reserved > 0 && (
+                                  <span className="block text-[9px] text-amber-600 font-bold">
+                                    -{v.reserved} res.
+                                  </span>
+                                )}
+                              </div>
+
+                              {v.id ? (
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVariantStockChange(v.id, 10)}
+                                    className="px-2.5 py-1.5 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
+                                    title="Add 10 Units"
+                                  >
+                                    <TrendingUp className="h-3 w-3 text-emerald-700" /> +10
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleVariantStockChange(v.id, -10)}
+                                    className="px-2.5 py-1.5 bg-rose-100 text-rose-800 hover:bg-rose-200 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
+                                    title="Remove 10 Units"
+                                  >
+                                    <TrendingDown className="h-3 w-3 text-rose-700" /> -10
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setAdjustingVariant(v);
+                                      setAdjustQty((v.stock || 0).toString());
+                                    }}
+                                    className="p-1.5 bg-white text-gray-700 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors shadow-2xs"
+                                    title="Set Exact Quantity"
+                                  >
+                                    <Settings2 className="h-4 w-4" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="w-24 shrink-0">
+                                  <input
+                                    type="number"
+                                    placeholder="0"
+                                    className="w-full px-2 py-1 text-xs bg-emerald-50 text-emerald-900 font-bold text-center rounded-lg border border-emerald-200 outline-none"
+                                    value={v.stock || 0}
+                                    onChange={(e) => {
+                                      const list = [...variants];
+                                      list[idx].stock = e.target.value;
+                                      setVariants(list);
+                                    }}
+                                  />
+                                </div>
                               )}
                             </div>
-                            <div
-                              className={`w-2 h-2 rounded-full ${v.stock > 0 ? "bg-emerald-500" : "bg-rose-500"} animate-pulse`}
-                            ></div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               ) : (
-                <div className="p-8 text-center bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-                  <p className="text-sm text-gray-500 italic">
-                    This product does not have any weight-based variants.
+                <div className="p-12 text-center bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                  <Package className="h-10 w-10 text-gray-300 mx-auto mb-3 opacity-60" />
+                  <p className="text-sm font-bold text-gray-600 mb-1">
+                    No Variant Combinations Added Yet
+                  </p>
+                  <p className="text-xs text-gray-400 mb-4 max-w-sm mx-auto">
+                    Use the Option Niches Generator above or click "+ Add Single Variant" to set up variants directly on this product page.
                   </p>
                 </div>
               )}
@@ -250,8 +705,7 @@ const ProductDetailPage = () => {
           {/* Visual Assets (Images) */}
           <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden p-8">
             <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-6 flex items-center gap-2">
-              <ImageIcon className="h-4 w-4 text-blue-500" /> Attached Visual
-              Assets
+              <ImageIcon className="h-4 w-4 text-blue-500" /> Attached Visual Assets
             </h3>
             {product.images?.length > 0 ? (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -284,8 +738,7 @@ const ProductDetailPage = () => {
           <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden h-full flex flex-col">
             <div className="px-8 py-6 border-b border-gray-50 bg-gray-50/50 flex items-center justify-between shrink-0">
               <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                <Activity className="h-4 w-4 text-emerald-500" /> Recent
-                Activity
+                <Activity className="h-4 w-4 text-emerald-500" /> Recent Activity
               </h3>
             </div>
             <div className="p-0 overflow-y-auto max-h-[600px] flex-1">
@@ -370,6 +823,66 @@ const ProductDetailPage = () => {
           </section>
         </div>
       </div>
+
+      {/* Manual Adjustment Modal */}
+      {adjustingVariant && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-black text-gray-900 mb-2">
+              Adjust Variant Stock
+            </h3>
+            <p className="text-xs text-gray-500 mb-6 font-medium">
+              Updating stock level for:
+              <span className="font-bold text-gray-900 block mt-1">
+                {formatVariantTitle(adjustingVariant)} ({adjustingVariant.sku})
+              </span>
+            </p>
+
+            <div className="space-y-4">
+              <div>
+                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                  New Total Quantity
+                </label>
+                <input
+                  type="number"
+                  placeholder="e.g. 100"
+                  className="w-full mt-2 px-6 py-4 bg-gray-50 border-none rounded-2xl font-black text-xl focus:ring-2 focus:ring-primary-500/20 outline-none"
+                  value={adjustQty}
+                  onChange={(e) => setAdjustQty(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setAdjustingVariant(null)}
+                  className="flex-1 py-4 text-gray-400 font-bold hover:bg-gray-50 rounded-2xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyManualAdjustment}
+                  className="flex-1 py-4 bg-primary-600 text-white rounded-2xl font-black shadow-lg shadow-primary-500/30 hover:bg-primary-700 transition-all active:scale-95"
+                >
+                  Apply Stock
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* BARCODE MODAL */}
+      {barcodeModal && (
+        <BarcodeModal
+          sku={barcodeModal.sku}
+          title={barcodeModal.title}
+          price={barcodeModal.price}
+          onClose={() => setBarcodeModal(null)}
+        />
+      )}
     </div>
   );
 };

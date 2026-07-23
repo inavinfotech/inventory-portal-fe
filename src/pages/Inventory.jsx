@@ -14,8 +14,13 @@ import {
   Image as ImageIcon,
   Settings2,
   Edit3,
+  Sparkles,
+  Layers,
+  Barcode,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
+import { generateProductSku, generateVariantSku, sanitizeSkuInput } from "../utils/skuGenerator";
+import BarcodeModal from "../components/BarcodeModal";
 
 const Inventory = () => {
   const navigate = useNavigate();
@@ -30,6 +35,7 @@ const Inventory = () => {
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [editProduct, setEditProduct] = useState(null);
   const [adjustmentAmount, setAdjustmentAmount] = useState("");
+  const [barcodeModal, setBarcodeModal] = useState(null);
   const [newProduct, setNewProduct] = useState({
     name: "",
     sku: "",
@@ -40,6 +46,74 @@ const Inventory = () => {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [expandedProduct, setExpandedProduct] = useState(null);
+
+  // Dynamic Option Niches Generator States
+  const [addOptionNiches, setAddOptionNiches] = useState([
+    { name: "Size", values: "Small, Medium, Large" },
+    { name: "Color", values: "Red, Green, Blue" },
+  ]);
+  const [showGenAdd, setShowGenAdd] = useState(false);
+
+  const [editOptionNiches, setEditOptionNiches] = useState([
+    { name: "Size", values: "Small, Medium, Large" },
+    { name: "Color", values: "Red, Green, Blue" },
+  ]);
+  const [showGenEdit, setShowGenEdit] = useState(false);
+
+  const formatVariantTitle = (v) => {
+    if (!v) return "Standard Item";
+    const parts = [];
+    if (v.attributes && typeof v.attributes === "object" && Object.keys(v.attributes).length > 0) {
+      Object.entries(v.attributes).forEach(([k, val]) => {
+        if (val) parts.push(`${k}: ${val}`);
+      });
+    }
+    if (parts.length === 0) {
+      if (v.size) parts.push(`Size: ${v.size}`);
+      if (v.color) parts.push(`Color: ${v.color}`);
+      if (v.weight) parts.push(`Weight: ${v.weight}`);
+    }
+    return parts.length > 0 ? parts.join(" / ") : (v.sku || "Variant");
+  };
+
+  const generateDynamicCombinations = (niches, baseSku, basePrice) => {
+    const validNiches = niches
+      .map((n) => ({
+        name: n.name.trim(),
+        values: n.values.split(",").map((v) => v.trim()).filter(Boolean),
+      }))
+      .filter((n) => n.name && n.values.length > 0);
+
+    if (validNiches.length === 0) return [];
+
+    const cartesian = (arrays) =>
+      arrays.reduce(
+        (a, b) => a.flatMap((d) => b.map((e) => [...d, e])),
+        [[]]
+      );
+
+    const valueArrays = validNiches.map((n) => n.values);
+    const combinations = cartesian(valueArrays);
+    const prefix = baseSku ? baseSku.trim().toUpperCase() : "PROD";
+
+    return combinations.map((combo) => {
+      const attributes = {};
+      combo.forEach((val, idx) => {
+        const nicheName = validNiches[idx].name;
+        attributes[nicheName] = val;
+      });
+
+      return {
+        attributes,
+        size: attributes["Size"] || attributes["size"] || "",
+        color: attributes["Color"] || attributes["color"] || "",
+        weight: attributes["Weight"] || attributes["weight"] || "",
+        sku: generateVariantSku(baseSku, attributes),
+        price: basePrice || "0",
+        stock: 0,
+      };
+    });
+  };
 
   useEffect(() => {
     fetchInventory();
@@ -135,8 +209,13 @@ const Inventory = () => {
         price: parseFloat(newProduct.price),
         images: imageUrls,
         variants: newProduct.variants.map((v) => ({
-          ...v,
-          price: parseFloat(v.price),
+          sku: v.sku,
+          size: v.size || (v.attributes?.Size || v.attributes?.size || null),
+          color: v.color || (v.attributes?.Color || v.attributes?.color || null),
+          weight: v.weight || (v.attributes?.Weight || v.attributes?.weight || null),
+          attributes: v.attributes || null,
+          price: parseFloat(v.price || newProduct.price),
+          initial_stock: parseInt(v.stock || v.initial_stock || 0) || 0,
         })),
       });
 
@@ -149,6 +228,11 @@ const Inventory = () => {
         variants: [],
       });
       setSelectedFiles([]);
+      setShowGenAdd(false);
+      setAddOptionNiches([
+        { name: "Size", values: "Small, Medium, Large" },
+        { name: "Color", values: "Red, Green, Blue" },
+      ]);
       fetchInventory();
     } catch (err) {
       alert(
@@ -185,16 +269,21 @@ const Inventory = () => {
         price: parseFloat(updateData.price),
         images: imageUrls,
         variants: updateData.variants?.map((v) => ({
-          id: v.id,
+          id: v.id || undefined,
           sku: v.sku,
-          weight: v.weight,
-          price: parseFloat(v.price),
+          size: v.size || (v.attributes?.Size || v.attributes?.size || null),
+          color: v.color || (v.attributes?.Color || v.attributes?.color || null),
+          weight: v.weight || (v.attributes?.Weight || v.attributes?.weight || null),
+          attributes: v.attributes || null,
+          price: parseFloat(v.price || updateData.price),
+          stock: parseInt(v.stock || 0) || 0,
         })),
       });
 
       setShowEditModal(false);
       setEditProduct(null);
       setSelectedFiles([]);
+      setShowGenEdit(false);
       fetchInventory();
     } catch (err) {
       alert(
@@ -279,7 +368,16 @@ const Inventory = () => {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => {
+              setNewProduct({
+                name: "",
+                sku: generateProductSku(""),
+                price: "",
+                description: "",
+                variants: [],
+              });
+              setShowAddModal(true);
+            }}
             className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-black shadow-lg shadow-gray-900/10 transition-all active:scale-95"
           >
             <Plus className="h-4 w-4" /> Add Product
@@ -373,7 +471,7 @@ const Inventory = () => {
                                     }}
                                     className="ml-2 text-primary-600 hover:underline font-bold"
                                   >
-                                    * {product.variants.length} Weights{" "}
+                                    * {product.variants.length} Combinations{" "}
                                     {expandedProduct === product.id
                                       ? "Up"
                                       : "Down"}
@@ -453,6 +551,13 @@ const Inventory = () => {
                             >
                               <Edit3 className="h-4 w-4" />
                             </button>
+                            <button
+                              onClick={() => setBarcodeModal({ sku: product.sku, title: product.name, price: product.price })}
+                              className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-indigo-100"
+                              title="View & Download Barcode"
+                            >
+                              <Barcode className="h-4 w-4" />
+                            </button>
                             <div className="h-6 w-px bg-gray-200 mx-1"></div>
                             <button
                               onClick={() =>
@@ -476,12 +581,12 @@ const Inventory = () => {
                                     className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0 hover:bg-white px-5 rounded-2xl transition-all shadow-sm group"
                                   >
                                     <div className="flex items-center gap-8">
-                                      <div className="flex flex-col min-w-[100px]">
+                                      <div className="flex flex-col min-w-[140px]">
                                         <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                                          Weight
+                                          Variant Combination
                                         </span>
-                                        <span className="font-bold text-gray-900">
-                                          {v.weight}
+                                        <span className="font-bold text-gray-900 text-xs">
+                                          {formatVariantTitle(v)}
                                         </span>
                                       </div>
                                       <div className="flex flex-col min-w-[140px]">
@@ -550,6 +655,13 @@ const Inventory = () => {
                                       >
                                         <Settings2 className="h-4 w-4" />
                                       </button>
+                                      <button
+                                        onClick={() => setBarcodeModal({ sku: v.sku, title: `${product.name} (${formatVariantTitle(v)})`, price: v.price })}
+                                        className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors border border-indigo-100 bg-white shadow-sm"
+                                        title="View & Download Barcode"
+                                      >
+                                        <Barcode className="h-4 w-4" />
+                                      </button>
                                     </div>
                                   </div>
                                 ))}
@@ -597,15 +709,24 @@ const Inventory = () => {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                    SKU Identity
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
+                      SKU Identity
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setNewProduct({ ...newProduct, sku: generateProductSku(newProduct.name) })}
+                      className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5"
+                    >
+                      <Sparkles className="h-2.5 w-2.5" /> Auto SKU
+                    </button>
+                  </div>
                   <input
                     type="text"
                     className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-sm text-gray-900"
                     value={newProduct.sku}
                     onChange={(e) =>
-                      setNewProduct({ ...newProduct, sku: e.target.value })
+                      setNewProduct({ ...newProduct, sku: sanitizeSkuInput(e.target.value) })
                     }
                   />
                 </div>
@@ -647,28 +768,128 @@ const Inventory = () => {
               {/* Variants Section */}
               <div className="space-y-4 rounded-2xl bg-gray-50 p-4 border border-gray-100">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">
-                    Product Variants (Weight)
+                  <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers className="h-4 w-4 text-primary-600" /> Variant Combinations
                   </h4>
-                  <button
-                    onClick={() =>
-                      setNewProduct({
-                        ...newProduct,
-                        variants: [
-                          ...newProduct.variants,
-                          {
-                            weight: "",
-                            sku: `${newProduct.sku}-${newProduct.variants.length + 1}`,
-                            price: newProduct.price,
-                          },
-                        ],
-                      })
-                    }
-                    className="text-[10px] font-bold text-primary-600 hover:text-primary-700 bg-primary-50 px-2 py-1 rounded-lg transition-colors"
-                  >
-                    + Add Weight Variant
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowGenAdd(!showGenAdd)}
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-2 py-1 rounded-lg transition-colors flex items-center gap-1"
+                    >
+                      <Sparkles className="h-3 w-3" /> Matrix Generator
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setNewProduct({
+                          ...newProduct,
+                          variants: [
+                            ...newProduct.variants,
+                            {
+                              size: "",
+                              color: "",
+                              weight: "",
+                              sku: generateVariantSku(newProduct.sku, {}),
+                              price: newProduct.price || "0",
+                              stock: 0,
+                            },
+                          ],
+                        })
+                      }
+                      className="text-[10px] font-bold text-primary-600 hover:text-primary-700 bg-primary-50 px-2 py-1 rounded-lg transition-colors"
+                    >
+                      + Add Single Variant
+                    </button>
+                  </div>
                 </div>
+
+                {/* Matrix Generator Box */}
+                {showGenAdd && (
+                  <div className="p-3 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-3 animate-in slide-in-from-top-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-bold text-indigo-900 flex items-center gap-1">
+                        <Sparkles className="h-3.5 w-3.5 text-indigo-600" /> Custom Option Niches Generator
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setAddOptionNiches([...addOptionNiches, { name: "", values: "" }])}
+                        className="text-[9px] font-bold text-indigo-700 hover:text-indigo-900 bg-white px-2 py-0.5 rounded border border-indigo-200 shadow-sm"
+                      >
+                        + Add Option Niche
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {addOptionNiches.map((niche, nIdx) => (
+                        <div key={nIdx} className="grid grid-cols-5 gap-2 items-center bg-white p-2 rounded-lg border border-indigo-100">
+                          <div className="col-span-2">
+                            <label className="text-[8px] font-bold text-indigo-500 uppercase">Niche Name</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Size, Color, Storage"
+                              className="w-full px-2 py-1 text-xs bg-gray-50 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
+                              value={niche.name}
+                              onChange={(e) => {
+                                const list = [...addOptionNiches];
+                                list[nIdx].name = e.target.value;
+                                setAddOptionNiches(list);
+                              }}
+                            />
+                          </div>
+                          <div className="col-span-3 relative flex items-center gap-1">
+                            <div className="flex-1">
+                              <label className="text-[8px] font-bold text-indigo-500 uppercase">Values (comma separated)</label>
+                              <input
+                                type="text"
+                                placeholder="e.g. S, M, L or 128GB, 256GB"
+                                className="w-full px-2 py-1 text-xs bg-gray-50 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500"
+                                value={niche.values}
+                                onChange={(e) => {
+                                  const list = [...addOptionNiches];
+                                  list[nIdx].values = e.target.value;
+                                  setAddOptionNiches(list);
+                                }}
+                              />
+                            </div>
+                            {addOptionNiches.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => setAddOptionNiches(addOptionNiches.filter((_, i) => i !== nIdx))}
+                                className="text-rose-500 hover:text-rose-700 p-1 mt-3"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const combos = generateDynamicCombinations(
+                          addOptionNiches,
+                          newProduct.sku,
+                          newProduct.price
+                        );
+                        if (combos.length > 0) {
+                          setNewProduct({
+                            ...newProduct,
+                            variants: [...newProduct.variants, ...combos],
+                          });
+                          setShowGenAdd(false);
+                        } else {
+                          alert("Please specify option names and values (comma separated) to generate combinations.");
+                        }
+                      }}
+                      className="w-full py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" /> Generate Combinations
+                    </button>
+                  </div>
+                )}
 
                 {newProduct.variants.length === 0 ? (
                   <p className="text-[10px] text-gray-400 italic">
@@ -679,60 +900,75 @@ const Inventory = () => {
                     {newProduct.variants.map((variant, idx) => (
                       <div
                         key={idx}
-                        className="grid grid-cols-3 gap-2 items-end bg-white p-3 rounded-xl border border-gray-100 relative group animate-in slide-in-from-top-2 duration-200"
+                        className="bg-white p-3 rounded-xl border border-gray-100 relative group animate-in slide-in-from-top-2 duration-200 space-y-2 shadow-sm"
                       >
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-bold text-gray-400 uppercase">
-                            Weight
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="e.g. 500g"
-                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none"
-                            value={variant.weight}
-                            onChange={(e) => {
-                              const v = [...newProduct.variants];
-                              v[idx].weight = e.target.value;
-                              setNewProduct({ ...newProduct, variants: v });
-                            }}
-                          />
+                        <div className="flex items-center justify-between border-b border-gray-100 pb-1.5">
+                          <span className="text-[10px] font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1">
+                            <Layers className="h-3 w-3 text-indigo-500" /> {formatVariantTitle(variant)}
+                          </span>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-bold text-gray-400 uppercase">
-                            Variant SKU
-                          </label>
-                          <input
-                            type="text"
-                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-mono"
-                            value={variant.sku}
-                            onChange={(e) => {
-                              const v = [...newProduct.variants];
-                              v[idx].sku = e.target.value;
-                              setNewProduct({ ...newProduct, variants: v });
-                            }}
-                          />
+
+                        <div className="grid grid-cols-3 gap-2 items-end">
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <label className="text-[9px] font-bold text-gray-400 uppercase">Variant SKU</label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const v = [...newProduct.variants];
+                                  v[idx].sku = generateVariantSku(newProduct.sku, v[idx].attributes || {});
+                                  setNewProduct({ ...newProduct, variants: v });
+                                }}
+                                className="text-[8px] font-bold text-indigo-600 hover:text-indigo-800"
+                              >
+                                Auto SKU
+                              </button>
+                            </div>
+                            <input
+                              type="text"
+                              className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-mono"
+                              value={variant.sku || ""}
+                              onChange={(e) => {
+                                const v = [...newProduct.variants];
+                                v[idx].sku = sanitizeSkuInput(e.target.value);
+                                setNewProduct({ ...newProduct, variants: v });
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-bold text-gray-400 uppercase">Price ($)</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-bold"
+                              value={variant.price || ""}
+                              onChange={(e) => {
+                                const v = [...newProduct.variants];
+                                v[idx].price = e.target.value;
+                                setNewProduct({ ...newProduct, variants: v });
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-bold text-gray-400 uppercase">Initial Qty</label>
+                            <input
+                              type="number"
+                              placeholder="0"
+                              className="w-full px-2 py-1.5 text-xs bg-emerald-50 text-emerald-900 rounded-lg border-none focus:ring-1 focus:ring-emerald-500/20 outline-none font-bold"
+                              value={variant.stock !== undefined ? variant.stock : ""}
+                              onChange={(e) => {
+                                const v = [...newProduct.variants];
+                                v[idx].stock = e.target.value;
+                                setNewProduct({ ...newProduct, variants: v });
+                              }}
+                            />
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-bold text-gray-400 uppercase">
-                            Price ($)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-bold"
-                            value={variant.price}
-                            onChange={(e) => {
-                              const v = [...newProduct.variants];
-                              v[idx].price = e.target.value;
-                              setNewProduct({ ...newProduct, variants: v });
-                            }}
-                          />
-                        </div>
+
                         <button
+                          type="button"
                           onClick={() => {
-                            const v = newProduct.variants.filter(
-                              (_, i) => i !== idx,
-                            );
+                            const v = newProduct.variants.filter((_, i) => i !== idx);
                             setNewProduct({ ...newProduct, variants: v });
                           }}
                           className="absolute -top-1 -right-1 p-1 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
@@ -853,15 +1089,24 @@ const Inventory = () => {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                    SKU Identity
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
+                      SKU Identity
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setEditProduct({ ...editProduct, sku: generateProductSku(editProduct.name) })}
+                      className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5"
+                    >
+                      <Sparkles className="h-2.5 w-2.5" /> Auto SKU
+                    </button>
+                  </div>
                   <input
                     type="text"
                     className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-sm text-gray-900"
                     value={editProduct.sku}
                     onChange={(e) =>
-                      setEditProduct({ ...editProduct, sku: e.target.value })
+                      setEditProduct({ ...editProduct, sku: sanitizeSkuInput(e.target.value) })
                     }
                   />
                 </div>
@@ -902,28 +1147,128 @@ const Inventory = () => {
               {/* Variants Section */}
               <div className="space-y-4 rounded-2xl bg-gray-50 p-4 border border-gray-100">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider">
-                    Product Variants (Weight)
+                  <h4 className="text-xs font-black text-gray-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Layers className="h-4 w-4 text-primary-600" /> Variant Combinations
                   </h4>
-                  <button
-                    onClick={() =>
-                      setEditProduct({
-                        ...editProduct,
-                        variants: [
-                          ...(editProduct.variants || []),
-                          {
-                            weight: "",
-                            sku: `${editProduct.sku}-${(editProduct.variants?.length || 0) + 1}`,
-                            price: editProduct.price,
-                          },
-                        ],
-                      })
-                    }
-                    className="text-[10px] font-bold text-primary-600 hover:text-primary-700 bg-primary-50 px-2 py-1 rounded-lg transition-colors"
-                  >
-                    + Add Weight Variant
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowGenEdit(!showGenEdit)}
+                      className="text-[10px] font-bold text-indigo-600 hover:text-indigo-700 bg-indigo-50 px-2 py-1 rounded-lg transition-colors flex items-center gap-1"
+                    >
+                      <Sparkles className="h-3 w-3" /> Matrix Generator
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEditProduct({
+                          ...editProduct,
+                          variants: [
+                            ...(editProduct.variants || []),
+                            {
+                              size: "",
+                              color: "",
+                              weight: "",
+                              sku: generateVariantSku(editProduct.sku, {}),
+                              price: editProduct.price || "0",
+                              stock: 0,
+                            },
+                          ],
+                        })
+                      }
+                      className="text-[10px] font-bold text-primary-600 hover:text-primary-700 bg-primary-50 px-2 py-1 rounded-lg transition-colors"
+                    >
+                      + Add Single Variant
+                    </button>
+                  </div>
                 </div>
+
+                {/* Matrix Generator Box */}
+                {showGenEdit && (
+                  <div className="p-3 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-3 animate-in slide-in-from-top-2">
+                    <div className="flex items-center justify-between">
+                      <div className="text-[11px] font-bold text-indigo-900 flex items-center gap-1">
+                        <Sparkles className="h-3.5 w-3.5 text-indigo-600" /> Custom Option Niches Generator
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setEditOptionNiches([...editOptionNiches, { name: "", values: "" }])}
+                        className="text-[9px] font-bold text-indigo-700 hover:text-indigo-900 bg-white px-2 py-0.5 rounded border border-indigo-200 shadow-sm"
+                      >
+                        + Add Option Niche
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {editOptionNiches.map((niche, nIdx) => (
+                        <div key={nIdx} className="grid grid-cols-5 gap-2 items-center bg-white p-2 rounded-lg border border-indigo-100">
+                          <div className="col-span-2">
+                            <label className="text-[8px] font-bold text-indigo-500 uppercase">Niche Name</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Size, Color, Storage"
+                              className="w-full px-2 py-1 text-xs bg-gray-50 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500 font-bold"
+                              value={niche.name}
+                              onChange={(e) => {
+                                const list = [...editOptionNiches];
+                                list[nIdx].name = e.target.value;
+                                setEditOptionNiches(list);
+                              }}
+                            />
+                          </div>
+                          <div className="col-span-3 relative flex items-center gap-1">
+                            <div className="flex-1">
+                              <label className="text-[8px] font-bold text-indigo-500 uppercase">Values (comma separated)</label>
+                              <input
+                                type="text"
+                                placeholder="e.g. S, M, L or 128GB, 256GB"
+                                className="w-full px-2 py-1 text-xs bg-gray-50 rounded border border-gray-200 outline-none focus:ring-1 focus:ring-indigo-500"
+                                value={niche.values}
+                                onChange={(e) => {
+                                  const list = [...editOptionNiches];
+                                  list[nIdx].values = e.target.value;
+                                  setEditOptionNiches(list);
+                                }}
+                              />
+                            </div>
+                            {editOptionNiches.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => setEditOptionNiches(editOptionNiches.filter((_, i) => i !== nIdx))}
+                                className="text-rose-500 hover:text-rose-700 p-1 mt-3"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const combos = generateDynamicCombinations(
+                          editOptionNiches,
+                          editProduct.sku,
+                          editProduct.price
+                        );
+                        if (combos.length > 0) {
+                          setEditProduct({
+                            ...editProduct,
+                            variants: [...(editProduct.variants || []), ...combos],
+                          });
+                          setShowGenEdit(false);
+                        } else {
+                          alert("Please specify option names and values (comma separated) to generate combinations.");
+                        }
+                      }}
+                      className="w-full py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
+                    >
+                      <Sparkles className="h-3.5 w-3.5" /> Generate Combinations
+                    </button>
+                  </div>
+                )}
 
                 {!editProduct.variants || editProduct.variants.length === 0 ? (
                   <p className="text-[10px] text-gray-400 italic">
@@ -934,60 +1279,75 @@ const Inventory = () => {
                     {editProduct.variants.map((variant, idx) => (
                       <div
                         key={idx}
-                        className="grid grid-cols-3 gap-2 items-end bg-white p-3 rounded-xl border border-gray-100 relative group animate-in slide-in-from-top-2 duration-200"
+                        className="bg-white p-3 rounded-xl border border-gray-100 relative group animate-in slide-in-from-top-2 duration-200 space-y-2 shadow-sm"
                       >
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-bold text-gray-400 uppercase">
-                            Weight
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="e.g. 500g"
-                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none"
-                            value={variant.weight}
-                            onChange={(e) => {
-                              const v = [...editProduct.variants];
-                              v[idx].weight = e.target.value;
-                              setEditProduct({ ...editProduct, variants: v });
-                            }}
-                          />
+                        <div className="flex items-center justify-between border-b border-gray-100 pb-1.5">
+                          <span className="text-[10px] font-black text-indigo-900 uppercase tracking-wider flex items-center gap-1">
+                            <Layers className="h-3 w-3 text-indigo-500" /> {formatVariantTitle(variant)}
+                          </span>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-bold text-gray-400 uppercase">
-                            Variant SKU
-                          </label>
-                          <input
-                            type="text"
-                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-mono"
-                            value={variant.sku}
-                            onChange={(e) => {
-                              const v = [...editProduct.variants];
-                              v[idx].sku = e.target.value;
-                              setEditProduct({ ...editProduct, variants: v });
-                            }}
-                          />
+
+                        <div className="grid grid-cols-3 gap-2 items-end">
+                          <div>
+                            <div className="flex items-center justify-between">
+                              <label className="text-[9px] font-bold text-gray-400 uppercase">Variant SKU</label>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const v = [...editProduct.variants];
+                                  v[idx].sku = generateVariantSku(editProduct.sku, v[idx].attributes || {});
+                                  setEditProduct({ ...editProduct, variants: v });
+                                }}
+                                className="text-[8px] font-bold text-indigo-600 hover:text-indigo-800"
+                              >
+                                Auto SKU
+                              </button>
+                            </div>
+                            <input
+                              type="text"
+                              className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-mono"
+                              value={variant.sku || ""}
+                              onChange={(e) => {
+                                const v = [...editProduct.variants];
+                                v[idx].sku = sanitizeSkuInput(e.target.value);
+                                setEditProduct({ ...editProduct, variants: v });
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-bold text-gray-400 uppercase">Price ($)</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-bold"
+                              value={variant.price || ""}
+                              onChange={(e) => {
+                                const v = [...editProduct.variants];
+                                v[idx].price = e.target.value;
+                                setEditProduct({ ...editProduct, variants: v });
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-bold text-gray-400 uppercase">Stock Qty</label>
+                            <input
+                              type="number"
+                              placeholder="0"
+                              className="w-full px-2 py-1.5 text-xs bg-emerald-50 text-emerald-900 rounded-lg border-none focus:ring-1 focus:ring-emerald-500/20 outline-none font-bold"
+                              value={variant.stock !== undefined ? variant.stock : ""}
+                              onChange={(e) => {
+                                const v = [...editProduct.variants];
+                                v[idx].stock = e.target.value;
+                                setEditProduct({ ...editProduct, variants: v });
+                              }}
+                            />
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          <label className="text-[9px] font-bold text-gray-400 uppercase">
-                            Price ($)
-                          </label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-bold"
-                            value={variant.price}
-                            onChange={(e) => {
-                              const v = [...editProduct.variants];
-                              v[idx].price = e.target.value;
-                              setEditProduct({ ...editProduct, variants: v });
-                            }}
-                          />
-                        </div>
+
                         <button
+                          type="button"
                           onClick={() => {
-                            const v = editProduct.variants.filter(
-                              (_, i) => i !== idx,
-                            );
+                            const v = editProduct.variants.filter((_, i) => i !== idx);
                             setEditProduct({ ...editProduct, variants: v });
                           }}
                           className="absolute -top-1 -right-1 p-1 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
@@ -1111,7 +1471,7 @@ const Inventory = () => {
           <div className="bg-white w-full max-w-sm rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200">
             <h3 className="text-xl font-black text-gray-900 mb-2">
               {selectedVariant
-                ? `Adjust Variant: ${selectedVariant.weight}`
+                ? `Adjust Variant: ${formatVariantTitle(selectedVariant)}`
                 : "Manual Adjustment"}
             </h3>
             <p className="text-xs text-gray-500 mb-6 font-medium">
@@ -1153,6 +1513,16 @@ const Inventory = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* BARCODE MODAL */}
+      {barcodeModal && (
+        <BarcodeModal
+          sku={barcodeModal.sku}
+          title={barcodeModal.title}
+          price={barcodeModal.price}
+          onClose={() => setBarcodeModal(null)}
+        />
       )}
     </div>
   );
