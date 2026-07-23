@@ -34,6 +34,7 @@ export const inventoryService = {
   getProducts: (limit = 10, offset = 0) =>
     api.get(`/products/?limit=${limit}&offset=${offset}`),
   getProduct: (id) => api.get(`/products/${id}`),
+  getProductById: (id) => api.get(`/products/${id}`),
   getProductStock: (id) => api.get(`/inventory/${id}`),
   addStock: (data) => api.post("/inventory/add", data),
   removeStock: (data) => api.post("/inventory/remove", data),
