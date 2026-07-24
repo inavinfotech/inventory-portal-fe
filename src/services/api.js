@@ -44,6 +44,7 @@ export const inventoryService = {
   getLowStock: () => api.get("/inventory/low-stock"),
   getMovements: (params) => api.get("/inventory/movements/", { params }),
   addProduct: (data) => api.post("/products/", data),
+  createProduct: (data) => api.post("/products/", data),
   updateProduct: (id, data) => api.put(`/products/${id}`, data),
   updateStock: (id, amount, variantId = null) =>
     api.post(`/inventory/adjust`, {
