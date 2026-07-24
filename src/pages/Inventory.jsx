@@ -331,6 +331,7 @@ const Inventory = () => {
           price: parseFloat(v.price || newProduct.price),
           initial_stock: parseInt(v.stock || 0),    // ← renamed from stock
           attributes: v.attributes || {},           // ← already a dict from generateDynamicCombinations
+          images: v.images || [],
         })),
       };
 

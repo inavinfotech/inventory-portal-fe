@@ -90,10 +90,42 @@ const ProductDetailPage = () => {
       const vAttrs = JSON.stringify(v.attributes || {});
       const origAttrs = JSON.stringify(orig.attributes || {});
       if (vAttrs !== origAttrs) return true;
+
+      const vImgs = JSON.stringify(v.images || []);
+      const origImgs = JSON.stringify(orig.images || []);
+      if (vImgs !== origImgs) return true;
     }
 
     return false;
   }, [product, variants]);
+
+  const handleVariantImageUpload = async (vIdx, e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    try {
+      const res = await inventoryService.uploadImages(files);
+      const uploadedUrls = res.data;
+      setVariants((prev) =>
+        prev.map((item, i) => {
+          if (i !== vIdx) return item;
+          const currentImgs = item.images || [];
+          return { ...item, images: [...currentImgs, ...uploadedUrls] };
+        })
+      );
+    } catch (err) {
+      alert("Failed to upload variant image: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleRemoveVariantImage = (vIdx, imgIdx) => {
+    setVariants((prev) =>
+      prev.map((item, i) => {
+        if (i !== vIdx) return item;
+        const currentImgs = item.images || [];
+        return { ...item, images: currentImgs.filter((_, idx) => idx !== imgIdx) };
+      })
+    );
+  };
 
   const openBarcodeModal = (sku, name) => {
     setBarcodeSku(sku);
@@ -201,6 +233,7 @@ const ProductDetailPage = () => {
           price: parseFloat(v.price || product.base_price || product.price || 0),
           attributes: v.attributes || {},
           stock: parseInt(v.stock || 0),
+          images: v.images || [],
         })),
       };
 
@@ -765,6 +798,48 @@ const ProductDetailPage = () => {
                               </div>
                             </div>
                           </div>
+                        </div>
+
+                        {/* Variant Images Section */}
+                        <div className="border-t border-gray-100 pt-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                              <ImageIcon className="h-3.5 w-3.5 text-indigo-500" /> Variant Specific Images ({v.images?.length || 0})
+                            </label>
+                            <label className="cursor-pointer text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100 hover:bg-indigo-100 transition-colors">
+                              <Plus className="h-3 w-3" /> Add Variant Images
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/*"
+                                className="hidden"
+                                onChange={(e) => handleVariantImageUpload(idx, e)}
+                              />
+                            </label>
+                          </div>
+                          {v.images && v.images.length > 0 ? (
+                            <div className="flex flex-wrap gap-2 items-center">
+                              {v.images.map((imgUrl, imgIdx) => {
+                                const baseUrl = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.split("/api/v1")[0] : "";
+                                const fullUrl = imgUrl && imgUrl.startsWith("/") ? baseUrl + imgUrl : imgUrl;
+                                return (
+                                  <div key={imgIdx} className="relative group w-12 h-12 rounded-xl overflow-hidden border border-gray-200 bg-gray-50 shadow-2xs">
+                                    <img src={fullUrl} alt={`Variant ${idx} image ${imgIdx}`} className="w-full h-full object-cover" />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveVariantImage(idx, imgIdx)}
+                                      className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
+                                      title="Remove Image"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5 text-rose-400 hover:text-rose-200" />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-gray-400 italic">No variant-specific images set (will fall back to main product images on store)</p>
+                          )}
                         </div>
                       </div>
                     ))}

@@ -2,7 +2,7 @@
 
 # ==============================================================================
 # SVARP Portal Inventory Frontend Deployment Script
-# Target Server Location: /var/www/portal-inventory-fe (or /var/www/inventory-fe)
+# Target Server Location: /var/www/inventory-portal-fe (or /var/www/portal-inventory-fe)
 # ==============================================================================
 
 set -e
@@ -13,11 +13,15 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-FE_DIR="${FE_DIR:-/var/www/portal-inventory-fe}"
+FE_DIR="${FE_DIR:-/var/www/inventory-portal-fe}"
 BRANCH="${BRANCH:-dev}"
 
-if [ ! -d "$FE_DIR" ] && [ -d "/var/www/inventory-fe" ]; then
-  FE_DIR="/var/www/inventory-fe"
+if [ ! -d "$FE_DIR" ]; then
+  if [ -d "/var/www/portal-inventory-fe" ]; then
+    FE_DIR="/var/www/portal-inventory-fe"
+  elif [ -d "/var/www/inventory-fe" ]; then
+    FE_DIR="/var/www/inventory-fe"
+  fi
 fi
 
 echo -e "${CYAN}========================================================================${NC}"
