@@ -26,6 +26,7 @@ import {
   Lock,
   Barcode,
   Barcode as BarcodeIcon,
+  Copy,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
 import { generateVariantSku, sanitizeSkuInput } from "../utils/skuGenerator";
@@ -39,6 +40,15 @@ const ProductDetailPage = () => {
   const [loading, setLoading] = useState(true);
   const [movementsLoading, setMovementsLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [copiedSku, setCopiedSku] = useState(null);
+
+  const handleCopySku = (e, skuToCopy) => {
+    if (e) e.stopPropagation();
+    if (!skuToCopy) return;
+    navigator.clipboard.writeText(skuToCopy);
+    setCopiedSku(skuToCopy);
+    setTimeout(() => setCopiedSku(null), 2000);
+  };
 
   // In-Page Variant Management State
   const [variants, setVariants] = useState([]);
@@ -61,6 +71,30 @@ const ProductDetailPage = () => {
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
   const [adjustmentAmount, setAdjustmentAmount] = useState("");
 
+  const hasVariantChanges = React.useMemo(() => {
+    if (!product) return false;
+    const origVariants = product.variants || [];
+
+    if (variants.length !== origVariants.length) return true;
+
+    for (let i = 0; i < variants.length; i++) {
+      const v = variants[i];
+      const orig = origVariants[i];
+
+      if (!orig) return true;
+      if (v.id !== orig.id) return true;
+      if (v.sku !== orig.sku) return true;
+      if (parseFloat(v.price || 0) !== parseFloat(orig.price || 0)) return true;
+      if (parseInt(v.stock || 0) !== parseInt(orig.stock || 0)) return true;
+
+      const vAttrs = JSON.stringify(v.attributes || {});
+      const origAttrs = JSON.stringify(orig.attributes || {});
+      if (vAttrs !== origAttrs) return true;
+    }
+
+    return false;
+  }, [product, variants]);
+
   const openBarcodeModal = (sku, name) => {
     setBarcodeSku(sku);
     setBarcodeName(name);
@@ -77,7 +111,7 @@ const ProductDetailPage = () => {
       setLoading(true);
       const res = await inventoryService.getProductById(productId);
       setProduct(res.data);
-      setVariants(res.data.variants || []);
+      setVariants(JSON.parse(JSON.stringify(res.data.variants || [])));
       setError(null);
     } catch (err) {
       setError("Failed to load product details: " + (err.response?.data?.detail || err.message));
@@ -156,18 +190,25 @@ const ProductDetailPage = () => {
     try {
       setIsSaving(true);
       const payload = {
-        ...product,
+        name: product.name,
+        sku: product.sku,
+        base_price: parseFloat(product.base_price ?? product.price ?? 0),
+        description: product.description,
+        images: product.images,
         variants: variants.map((v) => ({
-          ...v,
-          price: parseFloat(v.price || product.price),
+          id: v.id,
+          sku: v.sku,
+          price: parseFloat(v.price || product.base_price || product.price || 0),
+          attributes: v.attributes || {},
           stock: parseInt(v.stock || 0),
         })),
       };
 
       await inventoryService.updateProduct(product.id, payload);
       await fetchProductDetails();
+      await fetchProductMovements();
       window.dispatchEvent(new Event("stock-updated"));
-      alert("Variants updated successfully!");
+      alert("Variants and stock updated successfully!");
     } catch (err) {
       alert("Failed to save variants: " + (err.response?.data?.detail || err.message));
     } finally {
@@ -175,30 +216,7 @@ const ProductDetailPage = () => {
     }
   };
 
-  const handleVariantStockChange = async (variantId, delta) => {
-    try {
-      if (delta > 0) {
-        await inventoryService.addStock({
-          product_id: product.id,
-          variant_id: variantId,
-          quantity: delta,
-        });
-      } else {
-        await inventoryService.removeStock({
-          product_id: product.id,
-          variant_id: variantId,
-          quantity: Math.abs(delta),
-        });
-      }
-      await fetchProductDetails();
-      await fetchProductMovements();
-      window.dispatchEvent(new Event("stock-updated"));
-    } catch (err) {
-      alert("Stock update failed: " + (err.response?.data?.detail || err.message));
-    }
-  };
-
-  const handleApplyManualAdjustment = async () => {
+  const handleApplyManualAdjustment = () => {
     if (!adjustingVariant) return;
     const amount = parseInt(adjustQty);
     if (isNaN(amount) || amount < 0) {
@@ -206,24 +224,16 @@ const ProductDetailPage = () => {
       return;
     }
 
-    try {
-      await inventoryService.updateStock(product.id, amount, adjustingVariant.id);
-      await inventoryService.addMovement({
-        product_id: product.id,
-        variant_id: adjustingVariant.id,
-        type: amount > adjustingVariant.stock ? "IN" : "OUT",
-        quantity: Math.abs(amount - adjustingVariant.stock),
-        reference_id: "in_page_manual_adjust",
-      });
+    setVariants((prev) =>
+      prev.map((item) =>
+        item.id === adjustingVariant.id || item === adjustingVariant
+          ? { ...item, stock: amount }
+          : item
+      )
+    );
 
-      setAdjustingVariant(null);
-      setAdjustQty("");
-      await fetchProductDetails();
-      await fetchProductMovements();
-      window.dispatchEvent(new Event("stock-updated"));
-    } catch (err) {
-      alert("Adjustment failed: " + (err.response?.data?.detail || err.message));
-    }
+    setAdjustingVariant(null);
+    setAdjustQty("");
   };
 
   if (loading) {
@@ -277,9 +287,24 @@ const ProductDetailPage = () => {
               <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-black uppercase rounded-lg tracking-widest border border-gray-200">
                 PROD-{product.id}
               </span>
-              <span className="font-mono text-gray-400 text-[10px] uppercase tracking-tighter">
-                SKU: {product.sku}
-              </span>
+              <button
+                type="button"
+                onClick={(e) => handleCopySku(e, product.sku)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[10px] font-mono font-bold transition-all border border-gray-200 cursor-pointer shadow-2xs"
+                title="Click to copy product SKU ID"
+              >
+                {copiedSku === product.sku ? (
+                  <>
+                    <Check className="h-3 w-3 text-emerald-600" />
+                    <span className="text-emerald-700 font-bold">Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3 text-gray-400" />
+                    <span>SKU: {product.sku}</span>
+                  </>
+                )}
+              </button>
             </div>
             <h1 className="text-3xl font-black text-gray-900 tracking-tight">
               {product.name}
@@ -289,7 +314,7 @@ const ProductDetailPage = () => {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setBarcodeModal({ sku: product.sku, title: product.name, price: product.price })}
+            onClick={() => setBarcodeModal({ sku: product.sku, title: product.name, price: product.base_price ?? product.price })}
             className="inline-flex items-center gap-2 px-5 py-3 bg-indigo-50 text-indigo-700 border border-indigo-100/80 rounded-2xl text-sm font-bold hover:bg-indigo-100 transition-all shadow-xs"
           >
             <Barcode className="h-4 w-4" /> Barcode
@@ -333,7 +358,7 @@ const ProductDetailPage = () => {
         <StatCard
           icon={<IndianRupee className="text-indigo-500" />}
           label="Retail Unit Price"
-          value={`₹${product.price?.toFixed(2)}`}
+          value={`₹${(product.base_price ?? product.price ?? 0).toFixed(2)}`}
           description="Base listing price"
           color="indigo"
         />
@@ -378,23 +403,30 @@ const ProductDetailPage = () => {
 
           {/* IN-PAGE VARIANT MANAGEMENT SECTION */}
           <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-6 py-5 border-b border-gray-50 bg-gray-50/50 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                  <Layers className="h-4 w-4 text-primary-500" /> Variant Combinations & Inventory Control
-                </h3>
-                <p className="text-xs text-gray-400 font-medium mt-0.5">
-                  Manage option niches, SKUs, prices, and stock levels directly on this page.
-                </p>
+            <div className="p-6 md:p-8 border-b border-gray-100 bg-gradient-to-r from-gray-50/80 via-white to-gray-50/50 space-y-5">
+              {/* Full-Width Heading */}
+              <div className="flex items-start gap-4 w-full">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0 shadow-2xs">
+                  <Layers className="h-5 w-5" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-lg font-black text-gray-900 tracking-tight">
+                    Variant Combinations & Inventory Control
+                  </h3>
+                  <p className="text-xs text-gray-500 font-medium mt-0.5">
+                    Manage option niches, SKUs, prices, and stock levels directly on this page.
+                  </p>
+                </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2 shrink-0">
+              {/* Action Buttons on Next Line */}
+              <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-gray-200/50 w-full">
                 <button
                   type="button"
                   onClick={() => setShowGen(!showGen)}
-                  className="px-3 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-indigo-100 shadow-xs"
+                  className="px-4 py-2.5 bg-indigo-50/80 text-indigo-700 hover:bg-indigo-100 border border-indigo-200/60 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shadow-2xs hover:scale-[1.02] active:scale-95"
                 >
-                  <Sparkles className="h-3.5 w-3.5" /> Option Niches Generator
+                  <Sparkles className="h-4 w-4 text-indigo-600" /> Option Niches Generator
                 </button>
                 <button
                   type="button"
@@ -404,28 +436,30 @@ const ProductDetailPage = () => {
                       {
                         attributes: {},
                         sku: generateVariantSku(product.sku, {}),
-                        price: product.price,
+                        price: product.base_price || product.price || 0,
                         stock: 0,
                       },
                     ])
                   }
-                  className="px-3 py-2 bg-gray-100 text-gray-800 hover:bg-gray-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1 border border-gray-200"
+                  className="px-4 py-2.5 bg-white text-gray-800 hover:bg-gray-50 border border-gray-200 rounded-2xl text-xs font-bold transition-all flex items-center gap-2 shadow-2xs hover:scale-[1.02] active:scale-95"
                 >
-                  <Plus className="h-3.5 w-3.5" /> Add Variant
+                  <Plus className="h-4 w-4 text-gray-500" /> Add Variant
                 </button>
-                <button
-                  type="button"
-                  onClick={handleSaveVariants}
-                  disabled={isSaving}
-                  className="px-4 py-2 bg-gray-900 text-white hover:bg-black rounded-xl text-xs font-black transition-all flex items-center gap-1.5 shadow-md disabled:opacity-50"
-                >
-                  {isSaving ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Save className="h-3.5 w-3.5" />
-                  )}
-                  Save Variants
-                </button>
+                {hasVariantChanges && (
+                  <button
+                    type="button"
+                    onClick={handleSaveVariants}
+                    disabled={isSaving}
+                    className="px-6 py-2.5 bg-gray-900 text-white hover:bg-black rounded-2xl text-xs font-black transition-all flex items-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50 hover:scale-[1.02] active:scale-95 cursor-pointer sm:ml-auto animate-in fade-in zoom-in-95 duration-200"
+                  >
+                    {isSaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
+                    Save Variants
+                  </button>
+                )}
               </div>
             </div>
 
@@ -501,7 +535,7 @@ const ProductDetailPage = () => {
                     <button
                       type="button"
                       onClick={() => {
-                        const combos = generateDynamicCombinations(optionNiches, product.sku, product.price);
+                        const combos = generateDynamicCombinations(optionNiches, product.sku, product.base_price || product.price);
                         if (combos.length > 0) {
                           setVariants([...variants, ...combos]);
                           setShowGen(false);
@@ -607,9 +641,8 @@ const ProductDetailPage = () => {
                                 <button
                                   type="button"
                                   onClick={() => {
-                                    const list = [...variants];
-                                    list[idx].sku = generateVariantSku(product.sku, v.attributes || {});
-                                    setVariants(list);
+                                    const newSku = generateVariantSku(product.sku, v.attributes || {});
+                                    setVariants(variants.map((item, i) => i === idx ? { ...item, sku: newSku } : item));
                                   }}
                                   className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5"
                                   title="Auto-Generate Variant SKU"
@@ -622,24 +655,39 @@ const ProductDetailPage = () => {
                                 </span>
                               )}
                             </div>
-                            <input
-                              type="text"
-                              disabled={Boolean(v.id)}
-                              readOnly={Boolean(v.id)}
-                              title={v.id ? "Variant SKU is fixed once generated" : ""}
-                              className={`w-full px-3 py-2 text-xs rounded-xl outline-none font-mono ${
-                                v.id
-                                  ? "bg-gray-100 text-gray-500 cursor-not-allowed border border-gray-200 select-none"
-                                  : "bg-gray-50/80 border border-gray-200 focus:bg-white focus:ring-2 focus:ring-primary-500/20 text-gray-800"
-                              }`}
-                              value={v.sku || ""}
-                              onChange={(e) => {
-                                if (v.id) return;
-                                const list = [...variants];
-                                list[idx].sku = sanitizeSkuInput(e.target.value);
-                                setVariants(list);
-                              }}
-                            />
+                            <div className="relative flex items-center">
+                              <input
+                                type="text"
+                                disabled={Boolean(v.id)}
+                                readOnly={Boolean(v.id)}
+                                title={v.id ? "Variant SKU is fixed once generated" : ""}
+                                className={`w-full pl-3 pr-8 py-2 text-xs rounded-xl outline-none font-mono ${
+                                  v.id
+                                    ? "bg-gray-100 text-gray-500 cursor-not-allowed border border-gray-200 select-none"
+                                    : "bg-gray-50/80 border border-gray-200 focus:bg-white focus:ring-2 focus:ring-primary-500/20 text-gray-800"
+                                }`}
+                                value={v.sku || ""}
+                                onChange={(e) => {
+                                  if (v.id) return;
+                                  const newSku = sanitizeSkuInput(e.target.value);
+                                  setVariants(variants.map((item, i) => i === idx ? { ...item, sku: newSku } : item));
+                                }}
+                              />
+                              {v.sku && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleCopySku(e, v.sku)}
+                                  className="absolute right-2 p-1 text-gray-400 hover:text-indigo-600 hover:bg-white rounded-lg transition-colors cursor-pointer"
+                                  title="Copy Variant SKU ID"
+                                >
+                                  {copiedSku === v.sku ? (
+                                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="h-3.5 w-3.5" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           {/* Price Column */}
@@ -655,9 +703,8 @@ const ProductDetailPage = () => {
                                 className="w-full pl-7 pr-3 py-2 text-xs bg-gray-50/80 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-primary-500/20 outline-none font-black text-gray-900"
                                 value={v.price || ""}
                                 onChange={(e) => {
-                                  const list = [...variants];
-                                  list[idx].price = e.target.value;
-                                  setVariants(list);
+                                  const newPrice = e.target.value;
+                                  setVariants(variants.map((item, i) => i === idx ? { ...item, price: newPrice } : item));
                                 }}
                               />
                             </div>
@@ -681,51 +728,41 @@ const ProductDetailPage = () => {
                                 )}
                               </div>
 
-                              {v.id ? (
-                                <div className="flex items-center gap-1.5 shrink-0">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleVariantStockChange(v.id, 10)}
-                                    className="px-2.5 py-1.5 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
-                                    title="Add 10 Units"
-                                  >
-                                    <TrendingUp className="h-3 w-3 text-emerald-700" /> +10
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleVariantStockChange(v.id, -10)}
-                                    className="px-2.5 py-1.5 bg-rose-100 text-rose-800 hover:bg-rose-200 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
-                                    title="Remove 10 Units"
-                                  >
-                                    <TrendingDown className="h-3 w-3 text-rose-700" /> -10
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setAdjustingVariant(v);
-                                      setAdjustQty((v.stock || 0).toString());
-                                    }}
-                                    className="p-1.5 bg-white text-gray-700 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors shadow-2xs"
-                                    title="Set Exact Quantity"
-                                  >
-                                    <Settings2 className="h-4 w-4" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="w-24 shrink-0">
-                                  <input
-                                    type="number"
-                                    placeholder="0"
-                                    className="w-full px-2 py-1 text-xs bg-emerald-50 text-emerald-900 font-bold text-center rounded-lg border border-emerald-200 outline-none"
-                                    value={v.stock || 0}
-                                    onChange={(e) => {
-                                      const list = [...variants];
-                                      list[idx].stock = e.target.value;
-                                      setVariants(list);
-                                    }}
-                                  />
-                                </div>
-                              )}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const newStock = Math.max(0, parseInt(v.stock || 0) + 10);
+                                    setVariants(variants.map((item, i) => i === idx ? { ...item, stock: newStock } : item));
+                                  }}
+                                  className="px-2.5 py-1.5 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
+                                  title="Add 10 Units"
+                                >
+                                  <TrendingUp className="h-3 w-3 text-emerald-700" /> +10
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const newStock = Math.max(0, parseInt(v.stock || 0) - 10);
+                                    setVariants(variants.map((item, i) => i === idx ? { ...item, stock: newStock } : item));
+                                  }}
+                                  className="px-2.5 py-1.5 bg-rose-100 text-rose-800 hover:bg-rose-200 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 shadow-2xs"
+                                  title="Remove 10 Units"
+                                >
+                                  <TrendingDown className="h-3 w-3 text-rose-700" /> -10
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAdjustingVariant(v);
+                                    setAdjustQty((v.stock || 0).toString());
+                                  }}
+                                  className="p-1.5 bg-white text-gray-700 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors shadow-2xs"
+                                  title="Set Exact Quantity"
+                                >
+                                  <Settings2 className="h-4 w-4" />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>

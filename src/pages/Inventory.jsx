@@ -19,6 +19,9 @@ import {
   Lock,
   Barcode,
   Barcode as BarcodeIcon,
+  Copy,
+  Check,
+  Save,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
 import { generateProductSku, generateVariantSku, sanitizeSkuInput } from "../utils/skuGenerator";
@@ -51,6 +54,40 @@ const Inventory = () => {
   const [barcodeModalOpen, setBarcodeModalOpen] = useState(false);
   const [barcodeSku, setBarcodeSku] = useState("");
   const [barcodeName, setBarcodeName] = useState("");
+  const [copiedSku, setCopiedSku] = useState(null);
+  const [originalProducts, setOriginalProducts] = useState([]);
+  const [isSavingStock, setIsSavingStock] = useState(false);
+
+  const hasPendingStockChanges = React.useMemo(() => {
+    if (!originalProducts.length || !products.length) return false;
+    for (let i = 0; i < products.length; i++) {
+      const p = products[i];
+      const origP = originalProducts.find((o) => o.id === p.id);
+      if (!origP) return true;
+
+      if (parseInt(p.stock || 0) !== parseInt(origP.stock || 0)) return true;
+
+      const pVariants = p.variants || [];
+      const origVariants = origP.variants || [];
+      if (pVariants.length !== origVariants.length) return true;
+
+      for (let j = 0; j < pVariants.length; j++) {
+        const v = pVariants[j];
+        const origV = origVariants.find((ov) => ov.id === v.id) || origVariants[j];
+        if (!origV) return true;
+        if (parseInt(v.stock || 0) !== parseInt(origV.stock || 0)) return true;
+      }
+    }
+    return false;
+  }, [products, originalProducts]);
+
+  const handleCopySku = (e, skuToCopy) => {
+    if (e) e.stopPropagation();
+    if (!skuToCopy) return;
+    navigator.clipboard.writeText(skuToCopy);
+    setCopiedSku(skuToCopy);
+    setTimeout(() => setCopiedSku(null), 2000);
+  };
 
   const openBarcodeModal = (sku, name) => {
     setBarcodeSku(sku);
@@ -133,7 +170,9 @@ const Inventory = () => {
     try {
       setLoading(true);
       const response = await inventoryService.getProducts();
-      setProducts(response.data.items || []);
+      const items = response.data.items || [];
+      setProducts(JSON.parse(JSON.stringify(items)));
+      setOriginalProducts(JSON.parse(JSON.stringify(items)));
       setError(null);
     } catch (err) {
       setError("Failed to fetch inventory. Please try again later.");
@@ -154,43 +193,106 @@ const Inventory = () => {
     setShowAdjustmentModal(true);
   };
 
-  const handleManualAdjustment = async () => {
+  const handleStockUpdateLocal = (productId, delta) => {
+    setProducts((prev) =>
+      prev.map((p) => {
+        if (p.id === productId) {
+          const currentStock = parseInt(p.stock || 0);
+          const newStock = Math.max(0, currentStock + delta);
+          return { ...p, stock: newStock };
+        }
+        return p;
+      })
+    );
+  };
+
+  const handleVariantStockUpdateLocal = (productId, variantId, delta) => {
+    setProducts((prev) =>
+      prev.map((p) => {
+        if (p.id === productId) {
+          const updatedVariants = (p.variants || []).map((v) => {
+            if (v.id === variantId) {
+              const currentStock = parseInt(v.stock || 0);
+              const newStock = Math.max(0, currentStock + delta);
+              return { ...v, stock: newStock };
+            }
+            return v;
+          });
+          const totalStock = updatedVariants.reduce((sum, item) => sum + parseInt(item.stock || 0), 0);
+          return { ...p, variants: updatedVariants, stock: totalStock };
+        }
+        return p;
+      })
+    );
+  };
+
+  const handleManualAdjustment = () => {
     const amount = parseInt(adjustmentAmount);
-    if (isNaN(amount) || amount === 0) {
-      alert("Please enter a valid non-zero number");
+    if (isNaN(amount) || amount < 0) {
+      alert("Please enter a valid stock quantity");
       return;
     }
 
+    if (selectedVariant && selectedProduct) {
+      const currentVal = parseInt(selectedVariant.stock || 0);
+      handleVariantStockUpdateLocal(selectedProduct.id, selectedVariant.id, amount - currentVal);
+    } else if (selectedProduct) {
+      handleStockUpdateLocal(selectedProduct.id, amount - parseInt(selectedProduct.stock || 0));
+    }
+
+    setShowAdjustmentModal(false);
+    setSelectedProduct(null);
+    setSelectedVariant(null);
+    setAdjustmentAmount("");
+  };
+
+  const handleSaveAllStockChanges = async () => {
     try {
-      await inventoryService.updateStock(
-        selectedProduct.id,
-        amount,
-        selectedVariant?.id,
-      );
+      setIsSavingStock(true);
+      for (const p of products) {
+        const origP = originalProducts.find((o) => o.id === p.id);
+        if (!origP) continue;
 
-      await inventoryService.addMovement({
-        product_id: selectedProduct.id,
-        variant_id: selectedVariant?.id,
-        type:
-          amount >
-          (selectedVariant ? selectedVariant.stock : selectedProduct.stock)
-            ? "IN"
-            : "OUT",
-        quantity: Math.abs(
-          amount -
-            (selectedVariant ? selectedVariant.stock : selectedProduct.stock),
-        ),
-        reference_id: "manual_adjustment",
-      });
+        const isProductModified =
+          parseInt(p.stock || 0) !== parseInt(origP.stock || 0) ||
+          JSON.stringify(p.variants) !== JSON.stringify(origP.variants);
 
-      setShowAdjustmentModal(false);
-      setSelectedVariant(null);
-      fetchInventory();
+        if (isProductModified) {
+          const payload = {
+            name: p.name,
+            sku: p.sku,
+            base_price: parseFloat(p.base_price ?? p.price ?? 0),
+            description: p.description,
+            images: p.images,
+            variants: (p.variants || []).map((v) => ({
+              id: v.id,
+              sku: v.sku,
+              price: parseFloat(v.price || p.base_price || p.price || 0),
+              attributes: v.attributes || {},
+              stock: parseInt(v.stock || 0),
+            })),
+          };
+
+          if (!p.variants || p.variants.length === 0) {
+            const diff = parseInt(p.stock || 0) - parseInt(origP.stock || 0);
+            if (diff > 0) {
+              await inventoryService.addStock({ product_id: p.id, quantity: diff });
+            } else if (diff < 0) {
+              await inventoryService.removeStock({ product_id: p.id, quantity: Math.abs(diff) });
+            }
+          } else {
+            await inventoryService.updateProduct(p.id, payload);
+          }
+        }
+      }
+
+      await fetchInventory();
       window.dispatchEvent(new Event("stock-updated"));
+      alert("All inventory stock changes saved successfully!");
     } catch (err) {
-      alert(
-        "Adjustment failed: " + (err.response?.data?.detail || err.message),
-      );
+      alert("Failed to save stock changes: " + (err.response?.data?.detail || err.message));
+    } finally {
+      setIsSavingStock(false);
     }
   };
 
@@ -209,14 +311,26 @@ const Inventory = () => {
         imageUrls = uploadRes.data;
       }
 
+      // Build variant_types from the niches that were used (if any variants exist)
+      const variantTypesFromNiches = addOptionNiches
+        .map((n) => ({
+          name: n.name.trim(),
+          options: n.values.split(",").map((v) => v.trim()).filter(Boolean),
+        }))
+        .filter((n) => n.name && n.options.length > 0);
+
       const productPayload = {
-        ...newProduct,
-        price: parseFloat(newProduct.price),
+        name: newProduct.name,
+        sku: newProduct.sku,
+        base_price: parseFloat(newProduct.price),   // ← renamed from price
+        description: newProduct.description,
         images: imageUrls,
+        variant_types: newProduct.variants.length > 0 ? variantTypesFromNiches : [],
         variants: newProduct.variants.map((v) => ({
-          ...v,
+          sku: v.sku,
           price: parseFloat(v.price || newProduct.price),
-          initial_stock: parseInt(v.stock || 0),
+          initial_stock: parseInt(v.stock || 0),    // ← renamed from stock
+          attributes: v.attributes || {},           // ← already a dict from generateDynamicCombinations
         })),
       };
 
@@ -248,7 +362,7 @@ const Inventory = () => {
   };
 
   const handleUpdateProduct = async () => {
-    if (!editProduct.name || !editProduct.sku || !editProduct.price) {
+    if (!editProduct.name || !editProduct.sku) {
       alert("Please fill in all required fields");
       return;
     }
@@ -262,18 +376,13 @@ const Inventory = () => {
         imageUrls = [...imageUrls, ...uploadRes.data];
       }
 
-      const { id, stock, created_at, updated_at, ...updateData } = editProduct;
+      const { id, stock, reserved, created_at, updated_at, variant_types, ...updateData } = editProduct;
       const payload = {
-        ...updateData,
-        price: parseFloat(editProduct.price),
+        name: updateData.name,
+        sku: updateData.sku,
+        base_price: parseFloat(editProduct.base_price || editProduct.price || 0), // ← renamed
+        description: updateData.description,
         images: imageUrls,
-        variants: editProduct.variants
-          ? editProduct.variants.map((v) => ({
-              ...v,
-              price: parseFloat(v.price || editProduct.price),
-              stock: parseInt(v.stock || 0),
-            }))
-          : [],
       };
 
       await inventoryService.updateProduct(id, payload);
@@ -294,51 +403,12 @@ const Inventory = () => {
     }
   };
 
-  const handleStockUpdate = async (productId, amount) => {
-    try {
-      if (amount > 0) {
-        await inventoryService.addStock({
-          product_id: productId,
-          quantity: amount,
-        });
-      } else {
-        await inventoryService.removeStock({
-          product_id: productId,
-          quantity: Math.abs(amount),
-        });
-      }
-      fetchInventory();
-      window.dispatchEvent(new Event("stock-updated"));
-    } catch (err) {
-      alert(
-        "Stock update failed: " + (err.response?.data?.detail || err.message),
-      );
-    }
+  const handleStockUpdate = (productId, amount) => {
+    handleStockUpdateLocal(productId, amount);
   };
 
-  const handleVariantStockUpdate = async (productId, variantId, amount) => {
-    try {
-      if (amount > 0) {
-        await inventoryService.addStock({
-          product_id: productId,
-          variant_id: variantId,
-          quantity: amount,
-        });
-      } else {
-        await inventoryService.removeStock({
-          product_id: productId,
-          variant_id: variantId,
-          quantity: Math.abs(amount),
-        });
-      }
-      fetchInventory();
-      window.dispatchEvent(new Event("stock-updated"));
-    } catch (err) {
-      alert(
-        "Variant stock update failed: " +
-          (err.response?.data?.detail || err.message),
-      );
-    }
+  const handleVariantStockUpdate = (productId, variantId, amount) => {
+    handleVariantStockUpdateLocal(productId, variantId, amount);
   };
 
   if (loading)
@@ -378,6 +448,42 @@ const Inventory = () => {
           </button>
         </div>
       </div>
+
+      {hasPendingStockChanges && (
+        <div className="bg-indigo-900 text-white p-4 rounded-2xl shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in slide-in-from-top-4 duration-200 border border-indigo-700">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-indigo-800 flex items-center justify-center text-amber-400 font-bold text-xs shrink-0 shadow-inner">
+              <Sparkles className="h-5 w-5" />
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-white">Unsaved Stock Modifications</h4>
+              <p className="text-xs text-indigo-200 font-medium">
+                You have pending stock level edits in draft. Click Save Stock Changes to persist to database.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={() => setProducts(JSON.parse(JSON.stringify(originalProducts)))}
+              className="px-3.5 py-2 bg-indigo-800/80 hover:bg-indigo-800 text-indigo-200 rounded-xl text-xs font-bold transition-all border border-indigo-700/60 cursor-pointer"
+            >
+              Discard
+            </button>
+            <button
+              onClick={handleSaveAllStockChanges}
+              disabled={isSavingStock}
+              className="px-5 py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-95"
+            >
+              {isSavingStock ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
+              Save Stock Changes
+            </button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="rounded-2xl bg-rose-50 p-4 text-rose-700 text-sm border border-rose-100 italic flex items-center gap-2">
@@ -453,9 +559,20 @@ const Inventory = () => {
                                   {product.sku}
                                 </span>
                                 <button
+                                  onClick={(e) => handleCopySku(e, product.sku)}
+                                  className="p-0.5 text-gray-400 hover:text-indigo-600 hover:bg-gray-100 rounded transition-colors"
+                                  title="Copy SKU ID"
+                                >
+                                  {copiedSku === product.sku ? (
+                                    <Check className="h-3 w-3 text-emerald-600" />
+                                  ) : (
+                                    <Copy className="h-3 w-3" />
+                                  )}
+                                </button>
+                                <button
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setBarcodeModal({ sku: product.sku, title: product.name, price: product.price });
+                                    setBarcodeModal({ sku: product.sku, title: product.name, price: product.base_price ?? product.price });
                                   }}
                                   className="p-0.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors"
                                   title="Barcode"
@@ -488,7 +605,7 @@ const Inventory = () => {
                           <span className="font-black text-gray-900">
                             {product.variants?.length > 0
                               ? `₹${Math.min(...product.variants.map((v) => v.price)).toFixed(2)} - ₹${Math.max(...product.variants.map((v) => v.price)).toFixed(2)}`
-                              : `₹${product.price?.toFixed(2)}`}
+                              : `₹${(product.base_price ?? product.price ?? 0).toFixed(2)}`}
                           </span>
                         </td>
                         <td className="px-6 py-4">
@@ -538,14 +655,14 @@ const Inventory = () => {
                               </>
                             )}
                             <button
-                              onClick={() => handleShowEdit(product)}
+                              onClick={() => navigate(`/inventory/${product.id}`)}
                               className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-blue-100"
-                              title="Edit Product"
+                              title="Edit Product Details & Variants"
                             >
                               <Edit3 className="h-4 w-4" />
                             </button>
                             <button
-                              onClick={() => setBarcodeModal({ sku: product.sku, title: product.name, price: product.price })}
+                              onClick={() => setBarcodeModal({ sku: product.sku, title: product.name, price: product.base_price ?? product.price })}
                               className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors border border-indigo-100"
                               title="View & Download Barcode"
                             >
@@ -563,114 +680,138 @@ const Inventory = () => {
                           </div>
                         </td>
                       </tr>
-                      {expandedProduct === product.id &&
-                        product.variants?.length > 0 && (
-                          <tr className="bg-gray-50/30 animate-in slide-in-from-top-4 duration-300">
-                            <td colSpan="4" className="px-12 py-4 shadow-inner">
-                              <div className="grid grid-cols-1 gap-2">
-                                {product.variants.map((v) => (
-                                  <div
-                                    key={v.id}
-                                    className="flex items-center justify-between py-3 border-b border-gray-100 last:border-0 hover:bg-white px-5 rounded-2xl transition-all shadow-sm group"
-                                  >
-                                    <div className="flex items-center gap-8">
-                                      <div className="flex flex-col min-w-[140px]">
-                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                                          Variant Combination
-                                        </span>
-                                        <span className="font-bold text-gray-900 text-xs">
-                                          {formatVariantTitle(v)}
-                                        </span>
+                      {expandedProduct === product.id && product.variants?.length > 0 && (
+                        <tr className="bg-gray-50/50 animate-in slide-in-from-top-4 duration-300">
+                          <td colSpan="4" className="p-6">
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-black text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                                  <Layers className="h-3.5 w-3.5 text-indigo-500" /> Variant Stock Tickets ({product.variants.length})
+                                </span>
+                                <span className="text-[10px] text-gray-400 font-medium italic">
+                                  Use controls to modify local stock draft • Click Save Stock Changes to persist
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-1 gap-3">
+                                {product.variants.map((v) => {
+                                  const origV = originalProducts.find((o) => o.id === product.id)?.variants?.find((ov) => ov.id === v.id);
+                                  const isStockModified = origV && parseInt(v.stock || 0) !== parseInt(origV.stock || 0);
+
+                                  return (
+                                    <div
+                                      key={v.id}
+                                      className={`bg-white rounded-2xl p-4 border transition-all shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 group ${
+                                        isStockModified ? "border-amber-300 bg-amber-50/30 ring-2 ring-amber-400/20" : "border-gray-100 hover:border-indigo-100"
+                                      }`}
+                                    >
+                                      {/* Variant Title & Attributes */}
+                                      <div className="flex items-center gap-3">
+                                        <div className="w-9 h-9 rounded-xl bg-indigo-50 text-indigo-600 font-black text-xs flex items-center justify-center shrink-0 border border-indigo-100/60">
+                                          <Layers className="h-4 w-4" />
+                                        </div>
+                                        <div>
+                                          <h5 className="font-bold text-gray-900 text-xs flex items-center gap-2">
+                                            {formatVariantTitle(v)}
+                                          </h5>
+                                          <div className="flex items-center gap-2 mt-1">
+                                            <span className="font-mono text-[10px] text-gray-400 font-bold">
+                                              SKU: {v.sku}
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => handleCopySku(e, v.sku)}
+                                              className="p-1 text-gray-400 hover:text-indigo-600 rounded transition-colors cursor-pointer"
+                                              title="Copy Variant SKU ID"
+                                            >
+                                              {copiedSku === v.sku ? (
+                                                <Check className="h-3 w-3 text-emerald-600" />
+                                              ) : (
+                                                <Copy className="h-3 w-3" />
+                                              )}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => setBarcodeModal({ sku: v.sku, title: `${product.name} (${formatVariantTitle(v)})`, price: v.price })}
+                                              className="p-1 text-gray-400 hover:text-gray-900 rounded transition-colors cursor-pointer"
+                                              title="View Barcode"
+                                            >
+                                              <BarcodeIcon className="h-3 w-3" />
+                                            </button>
+                                          </div>
+                                        </div>
                                       </div>
-                                      <div className="flex flex-col min-w-[140px]">
-                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                                          Variant SKU
-                                        </span>
-                                        <div className="flex items-center gap-1.5 mt-0.5">
-                                          <span className="font-mono text-xs text-gray-500 uppercase">
-                                            {v.sku}
+
+                                      {/* Price & Stock Badge & Stock Controls */}
+                                      <div className="flex flex-wrap items-center gap-6">
+                                        {/* Retail Price Tag */}
+                                        <div>
+                                          <span className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">
+                                            Price
                                           </span>
+                                          <span className="font-black text-xs text-gray-900">
+                                            ₹{typeof v.price === "number" ? v.price.toFixed(2) : parseFloat(v.price || 0).toFixed(2)}
+                                          </span>
+                                        </div>
+
+                                        {/* Stock Level Display */}
+                                        <div>
+                                          <span className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">
+                                            Stock Level
+                                          </span>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className={`font-black text-xs ${v.stock < 5 ? "text-rose-600" : "text-emerald-700"}`}>
+                                              {v.stock || 0} Units
+                                            </span>
+                                            {isStockModified && (
+                                              <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-md border border-amber-200">
+                                                Draft
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        {/* Quick Controls */}
+                                        <div className="flex items-center gap-1.5 bg-gray-50/80 p-1.5 rounded-xl border border-gray-200">
                                           <button
-                                            onClick={() => setBarcodeModal({ sku: v.sku, title: `${product.name} (${formatVariantTitle(v)})`, price: v.price })}
-                                            className="p-0.5 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded transition-colors cursor-pointer"
-                                            title="Barcode"
+                                            type="button"
+                                            onClick={() => handleVariantStockUpdate(product.id, v.id, 10)}
+                                            className="px-2.5 py-1 bg-emerald-100 text-emerald-800 hover:bg-emerald-200 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                                            title="Add 10 Units to Draft"
                                           >
-                                            <BarcodeIcon className="h-3 w-3" />
+                                            <TrendingUp className="h-3 w-3 text-emerald-700" /> +10
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleVariantStockUpdate(product.id, v.id, -10)}
+                                            className="px-2.5 py-1 bg-rose-100 text-rose-800 hover:bg-rose-200 font-bold text-xs rounded-lg transition-colors flex items-center gap-1 shadow-2xs cursor-pointer"
+                                            title="Remove 10 Units from Draft"
+                                          >
+                                            <TrendingDown className="h-3 w-3 text-rose-700" /> -10
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setSelectedProduct(product);
+                                              setSelectedVariant(v);
+                                              setAdjustmentAmount((v.stock || 0).toString());
+                                              setShowAdjustmentModal(true);
+                                            }}
+                                            className="p-1 bg-white text-gray-700 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors shadow-2xs cursor-pointer"
+                                            title="Set Exact Quantity"
+                                          >
+                                            <Settings2 className="h-3.5 w-3.5" />
                                           </button>
                                         </div>
                                       </div>
-                                      <div className="flex flex-col min-w-[100px]">
-                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                                          Price
-                                        </span>
-                                        <span className="font-black text-gray-900">
-                                          ₹{v.price.toFixed(2)}
-                                        </span>
-                                      </div>
-                                      <div className="flex flex-col min-w-[120px]">
-                                        <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">
-                                          Stock Level
-                                        </span>
-                                        <span
-                                          className={`font-bold ${v.stock < 5 ? "text-rose-600" : "text-emerald-600"}`}
-                                        >
-                                          {v.stock} units
-                                        </span>
-                                      </div>
                                     </div>
-                                    <div className="flex items-center gap-2 opacity-40 group-hover:opacity-100 transition-opacity">
-                                      <button
-                                        onClick={() =>
-                                          handleVariantStockUpdate(
-                                            product.id,
-                                            v.id,
-                                            10,
-                                          )
-                                        }
-                                        className="p-2 text-emerald-600 hover:bg-emerald-50 rounded-xl transition-colors border border-emerald-100 bg-white shadow-sm"
-                                        title="Add 10 units"
-                                      >
-                                        <TrendingUp className="h-4 w-4" />
-                                      </button>
-                                      <button
-                                        onClick={() =>
-                                          handleVariantStockUpdate(
-                                            product.id,
-                                            v.id,
-                                            -10,
-                                          )
-                                        }
-                                        className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors border border-rose-100 bg-white shadow-sm"
-                                        title="Remove 10 units"
-                                      >
-                                        <TrendingDown className="h-4 w-4" />
-                                      </button>
-                                      <button
-                                        onClick={() =>
-                                          handleShowVariantAdjustment(
-                                            product,
-                                            v,
-                                          )
-                                        }
-                                        className="p-2 text-primary-600 hover:bg-primary-50 rounded-xl transition-colors border border-primary-100 bg-white shadow-sm"
-                                        title="Manual Adjustment"
-                                      >
-                                        <Settings2 className="h-4 w-4" />
-                                      </button>
-                                      <button
-                                        onClick={() => setBarcodeModal({ sku: v.sku, title: `${product.name} (${formatVariantTitle(v)})`, price: v.price })}
-                                        className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors border border-indigo-100 bg-white shadow-sm"
-                                        title="View & Download Barcode"
-                                      >
-                                        <Barcode className="h-4 w-4" />
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
+                                  );
+                                })}
                               </div>
-                            </td>
-                          </tr>
-                        )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                     </React.Fragment>
                   ))
               )}
@@ -1057,8 +1198,8 @@ const Inventory = () => {
         </div>
       )}
 
-      {/* Edit Product Modal */}
-      {showEditModal && editProduct && (
+      {/* Edit Product Modal (Removed - product & variants edited on ProductDetailPage) */}
+      {false && (
         <div className="fixed inset-0 z-60 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
           <div className="bg-white w-full max-w-lg rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
             <div className="flex items-center justify-between mb-8">
@@ -1115,11 +1256,12 @@ const Inventory = () => {
                   type="number"
                   step="0.01"
                   className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-black text-gray-900"
-                  value={editProduct.price}
+                  value={editProduct.base_price ?? editProduct.price ?? ""}
                   onChange={(e) =>
                     setEditProduct({
                       ...editProduct,
-                      price: e.target.value,
+                      base_price: e.target.value,
+                      price: e.target.value,  // keep both in sync for display
                     })
                   }
                 />
