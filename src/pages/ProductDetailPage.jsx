@@ -23,6 +23,7 @@ import {
   X,
   Loader2,
   Check,
+  Lock,
   Barcode,
   Barcode as BarcodeIcon,
 } from "lucide-react";
@@ -602,24 +603,38 @@ const ProductDetailPage = () => {
                               <label className="block text-[10px] font-black text-gray-400 uppercase tracking-wider">
                                 SKU Identity
                               </label>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const list = [...variants];
-                                  list[idx].sku = generateVariantSku(product.sku, v.attributes || {});
-                                  setVariants(list);
-                                }}
-                                className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5"
-                                title="Auto-Generate Variant SKU"
-                              >
-                                <Sparkles className="h-2.5 w-2.5" /> Auto SKU
-                              </button>
+                              {!v.id ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const list = [...variants];
+                                    list[idx].sku = generateVariantSku(product.sku, v.attributes || {});
+                                    setVariants(list);
+                                  }}
+                                  className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5"
+                                  title="Auto-Generate Variant SKU"
+                                >
+                                  <Sparkles className="h-2.5 w-2.5" /> Auto SKU
+                                </button>
+                              ) : (
+                                <span className="text-[9px] font-bold text-amber-600 flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200/60" title="Fixed once generated">
+                                  <Lock className="h-2.5 w-2.5" /> Fixed
+                                </span>
+                              )}
                             </div>
                             <input
                               type="text"
-                              className="w-full px-3 py-2 text-xs bg-gray-50/80 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-gray-800"
+                              disabled={Boolean(v.id)}
+                              readOnly={Boolean(v.id)}
+                              title={v.id ? "Variant SKU is fixed once generated" : ""}
+                              className={`w-full px-3 py-2 text-xs rounded-xl outline-none font-mono ${
+                                v.id
+                                  ? "bg-gray-100 text-gray-500 cursor-not-allowed border border-gray-200 select-none"
+                                  : "bg-gray-50/80 border border-gray-200 focus:bg-white focus:ring-2 focus:ring-primary-500/20 text-gray-800"
+                              }`}
                               value={v.sku || ""}
                               onChange={(e) => {
+                                if (v.id) return;
                                 const list = [...variants];
                                 list[idx].sku = sanitizeSkuInput(e.target.value);
                                 setVariants(list);

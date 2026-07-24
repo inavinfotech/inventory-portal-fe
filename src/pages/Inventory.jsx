@@ -16,6 +16,7 @@ import {
   Edit3,
   Sparkles,
   Layers,
+  Lock,
   Barcode,
   Barcode as BarcodeIcon,
 } from "lucide-react";
@@ -1092,21 +1093,17 @@ const Inventory = () => {
                     <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
                       SKU Identity
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => setEditProduct({ ...editProduct, sku: generateProductSku(editProduct.name) })}
-                      className="text-[9px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5"
-                    >
-                      <Sparkles className="h-2.5 w-2.5" /> Auto SKU
-                    </button>
+                    <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200/60 flex items-center gap-1">
+                      <Lock className="h-2.5 w-2.5" /> Fixed ID
+                    </span>
                   </div>
                   <input
                     type="text"
-                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-mono text-sm text-gray-900"
+                    disabled
+                    readOnly
+                    title="Product ID & SKU are fixed once generated"
+                    className="w-full px-4 py-3 bg-gray-100 border border-gray-200 rounded-xl outline-none font-mono text-sm text-gray-500 cursor-not-allowed select-none"
                     value={editProduct.sku}
-                    onChange={(e) =>
-                      setEditProduct({ ...editProduct, sku: sanitizeSkuInput(e.target.value) })
-                    }
                   />
                 </div>
               </div>
@@ -1287,23 +1284,37 @@ const Inventory = () => {
                           <div>
                             <div className="flex items-center justify-between">
                               <label className="text-[9px] font-bold text-gray-400 uppercase">Variant SKU</label>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const v = [...editProduct.variants];
-                                  v[idx].sku = generateVariantSku(editProduct.sku, v[idx].attributes || {});
-                                  setEditProduct({ ...editProduct, variants: v });
-                                }}
-                                className="text-[8px] font-bold text-indigo-600 hover:text-indigo-800"
-                              >
-                                Auto SKU
-                              </button>
+                              {!variant.id ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const v = [...editProduct.variants];
+                                    v[idx].sku = generateVariantSku(editProduct.sku, v[idx].attributes || {});
+                                    setEditProduct({ ...editProduct, variants: v });
+                                  }}
+                                  className="text-[8px] font-bold text-indigo-600 hover:text-indigo-800"
+                                >
+                                  Auto SKU
+                                </button>
+                              ) : (
+                                <span className="text-[8px] font-bold text-amber-600 flex items-center gap-0.5" title="Fixed once generated">
+                                  <Lock className="h-2 w-2" /> Fixed
+                                </span>
+                              )}
                             </div>
                             <input
                               type="text"
-                              className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-mono"
+                              disabled={Boolean(variant.id)}
+                              readOnly={Boolean(variant.id)}
+                              title={variant.id ? "Variant SKU is fixed once generated" : ""}
+                              className={`w-full px-2 py-1.5 text-xs rounded-lg outline-none font-mono ${
+                                variant.id
+                                  ? "bg-gray-100 text-gray-500 cursor-not-allowed border border-gray-200"
+                                  : "bg-gray-50 border-none focus:ring-1 focus:ring-primary-500/20"
+                              }`}
                               value={variant.sku || ""}
                               onChange={(e) => {
+                                if (variant.id) return;
                                 const v = [...editProduct.variants];
                                 v[idx].sku = sanitizeSkuInput(e.target.value);
                                 setEditProduct({ ...editProduct, variants: v });
