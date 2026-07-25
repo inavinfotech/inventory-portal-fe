@@ -22,6 +22,9 @@ import {
   Copy,
   Check,
   Save,
+  ChevronLeft,
+  ChevronRight,
+  Star,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
 import { generateProductSku, generateVariantSku, sanitizeSkuInput } from "../utils/skuGenerator";
@@ -204,6 +207,24 @@ const Inventory = () => {
         return p;
       })
     );
+  };
+
+  const handleMoveExistingProductImage = (imgIdx, direction) => {
+    if (!editProduct?.images || editProduct.images.length <= 1) return;
+    const imgs = [...editProduct.images];
+    if (direction === "left" && imgIdx > 0) {
+      const temp = imgs[imgIdx];
+      imgs[imgIdx] = imgs[imgIdx - 1];
+      imgs[imgIdx - 1] = temp;
+    } else if (direction === "right" && imgIdx < imgs.length - 1) {
+      const temp = imgs[imgIdx];
+      imgs[imgIdx] = imgs[imgIdx + 1];
+      imgs[imgIdx + 1] = temp;
+    } else if (direction === "cover" && imgIdx > 0) {
+      const [selected] = imgs.splice(imgIdx, 1);
+      imgs.unshift(selected);
+    }
+    setEditProduct({ ...editProduct, images: imgs });
   };
 
   const handleVariantStockUpdateLocal = (productId, variantId, delta) => {
@@ -1521,31 +1542,86 @@ const Inventory = () => {
                   Product Images
                 </label>
                 <div className="grid grid-cols-4 gap-2">
-                  {(editProduct.images || []).map((img, idx) => (
-                    <div
-                      key={`existing-${idx}`}
-                      className="relative aspect-square rounded-xl bg-gray-100 overflow-hidden group"
-                    >
-                      <img
-                        src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${img}`}
-                        alt="product"
-                        className="w-full h-full object-cover"
-                      />
-                      <button
-                        onClick={() =>
-                          setEditProduct({
-                            ...editProduct,
-                            images: editProduct.images.filter(
-                              (_, i) => i !== idx,
-                            ),
-                          })
-                        }
-                        className="absolute top-1 right-1 p-1 bg-rose-500 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                  {(editProduct.images || []).map((img, idx) => {
+                    const isCover = idx === 0;
+                    return (
+                      <div
+                        key={`existing-${idx}`}
+                        className={`relative aspect-square rounded-xl overflow-hidden group border transition-all ${
+                          isCover ? "border-indigo-500 ring-2 ring-indigo-500/20 shadow-md" : "border-gray-200 bg-gray-50"
+                        }`}
                       >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </div>
-                  ))}
+                        <img
+                          src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${img}`}
+                          alt="product"
+                          className="w-full h-full object-cover"
+                        />
+
+                        {/* Sequence Position Badge */}
+                        <span
+                          className={`absolute top-1 left-1 px-1.5 py-0.5 rounded-md text-[9px] font-black shadow-sm ${
+                            isCover ? "bg-indigo-600 text-white" : "bg-black/60 text-white backdrop-blur-xs"
+                          }`}
+                        >
+                          {isCover ? "★ Cover" : `#${idx + 1}`}
+                        </span>
+
+                        {/* Hover Overlay Controls */}
+                        <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1">
+                          <div className="flex items-center justify-between">
+                            {!isCover ? (
+                              <button
+                                type="button"
+                                onClick={() => handleMoveExistingProductImage(idx, "cover")}
+                                className="p-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md transition-colors"
+                                title="Set as Cover Image"
+                              >
+                                <Star className="h-3 w-3 fill-white" />
+                              </button>
+                            ) : (
+                              <span />
+                            )}
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEditProduct({
+                                  ...editProduct,
+                                  images: editProduct.images.filter(
+                                    (_, i) => i !== idx,
+                                  ),
+                                })
+                              }
+                              className="p-1 bg-rose-600 hover:bg-rose-700 text-white rounded-md transition-colors"
+                              title="Remove Image"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center justify-between gap-1 mt-auto">
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => handleMoveExistingProductImage(idx, "left")}
+                              className="p-1 bg-white/20 hover:bg-white/40 disabled:opacity-30 text-white rounded-md transition-colors cursor-pointer disabled:cursor-not-allowed"
+                              title="Move Left"
+                            >
+                              <ChevronLeft className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === (editProduct.images || []).length - 1}
+                              onClick={() => handleMoveExistingProductImage(idx, "right")}
+                              className="p-1 bg-white/20 hover:bg-white/40 disabled:opacity-30 text-white rounded-md transition-colors cursor-pointer disabled:cursor-not-allowed"
+                              title="Move Right"
+                            >
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                   {selectedFiles.map((file, idx) => (
                     <div
                       key={`new-${idx}`}

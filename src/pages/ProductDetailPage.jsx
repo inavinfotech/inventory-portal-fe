@@ -27,6 +27,9 @@ import {
   Barcode,
   Barcode as BarcodeIcon,
   Copy,
+  ChevronLeft,
+  ChevronRight,
+  Star,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
 import { generateVariantSku, sanitizeSkuInput } from "../utils/skuGenerator";
@@ -123,6 +126,30 @@ const ProductDetailPage = () => {
         if (i !== vIdx) return item;
         const currentImgs = item.images || [];
         return { ...item, images: currentImgs.filter((_, idx) => idx !== imgIdx) };
+      })
+    );
+  };
+
+  const handleMoveVariantImage = (vIdx, imgIdx, direction) => {
+    setVariants((prev) =>
+      prev.map((item, i) => {
+        if (i !== vIdx) return item;
+        const currentImgs = [...(item.images || [])];
+        if (currentImgs.length <= 1) return item;
+
+        if (direction === "left" && imgIdx > 0) {
+          const temp = currentImgs[imgIdx];
+          currentImgs[imgIdx] = currentImgs[imgIdx - 1];
+          currentImgs[imgIdx - 1] = temp;
+        } else if (direction === "right" && imgIdx < currentImgs.length - 1) {
+          const temp = currentImgs[imgIdx];
+          currentImgs[imgIdx] = currentImgs[imgIdx + 1];
+          currentImgs[imgIdx + 1] = temp;
+        } else if (direction === "cover" && imgIdx > 0) {
+          const [selectedImg] = currentImgs.splice(imgIdx, 1);
+          currentImgs.unshift(selectedImg);
+        }
+        return { ...item, images: currentImgs };
       })
     );
   };
@@ -818,21 +845,77 @@ const ProductDetailPage = () => {
                             </label>
                           </div>
                           {v.images && v.images.length > 0 ? (
-                            <div className="flex flex-wrap gap-2 items-center">
+                            <div className="flex flex-wrap gap-3 items-center pt-1">
                               {v.images.map((imgUrl, imgIdx) => {
                                 const baseUrl = import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.split("/api/v1")[0] : "";
                                 const fullUrl = imgUrl && imgUrl.startsWith("/") ? baseUrl + imgUrl : imgUrl;
+                                const isCover = imgIdx === 0;
+
                                 return (
-                                  <div key={imgIdx} className="relative group w-12 h-12 rounded-xl overflow-hidden border border-gray-200 bg-gray-50 shadow-2xs">
+                                  <div
+                                    key={imgIdx}
+                                    className={`relative group w-20 h-20 rounded-xl overflow-hidden border transition-all ${
+                                      isCover ? "border-indigo-500 ring-2 ring-indigo-500/20 shadow-md" : "border-gray-200 bg-gray-50 shadow-2xs"
+                                    }`}
+                                  >
                                     <img src={fullUrl} alt={`Variant ${idx} image ${imgIdx}`} className="w-full h-full object-cover" />
-                                    <button
-                                      type="button"
-                                      onClick={() => handleRemoveVariantImage(idx, imgIdx)}
-                                      className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
-                                      title="Remove Image"
+
+                                    {/* Sequence Position Badge */}
+                                    <span
+                                      className={`absolute top-1 left-1 px-1.5 py-0.5 rounded-md text-[9px] font-black shadow-sm ${
+                                        isCover ? "bg-indigo-600 text-white" : "bg-black/60 text-white backdrop-blur-xs"
+                                      }`}
                                     >
-                                      <Trash2 className="h-3.5 w-3.5 text-rose-400 hover:text-rose-200" />
-                                    </button>
+                                      {isCover ? "★ Cover" : `#${imgIdx + 1}`}
+                                    </span>
+
+                                    {/* Hover Action Controls */}
+                                    <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-1">
+                                      <div className="flex items-center justify-between">
+                                        {!isCover ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleMoveVariantImage(idx, imgIdx, "cover")}
+                                            className="p-1 bg-amber-500 hover:bg-amber-600 text-white rounded-md transition-colors"
+                                            title="Set as Primary Cover Image"
+                                          >
+                                            <Star className="h-3 w-3 fill-white" />
+                                          </button>
+                                        ) : (
+                                          <span />
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => handleRemoveVariantImage(idx, imgIdx)}
+                                          className="p-1 bg-rose-600 hover:bg-rose-700 text-white rounded-md transition-colors"
+                                          title="Remove Image"
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </button>
+                                      </div>
+
+                                      {/* Sequence Order Controls */}
+                                      <div className="flex items-center justify-between gap-1 mt-auto">
+                                        <button
+                                          type="button"
+                                          disabled={imgIdx === 0}
+                                          onClick={() => handleMoveVariantImage(idx, imgIdx, "left")}
+                                          className="p-1 bg-white/20 hover:bg-white/40 disabled:opacity-30 disabled:hover:bg-white/20 text-white rounded-md transition-colors cursor-pointer disabled:cursor-not-allowed"
+                                          title="Move Image Left"
+                                        >
+                                          <ChevronLeft className="h-3.5 w-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={imgIdx === v.images.length - 1}
+                                          onClick={() => handleMoveVariantImage(idx, imgIdx, "right")}
+                                          className="p-1 bg-white/20 hover:bg-white/40 disabled:opacity-30 disabled:hover:bg-white/20 text-white rounded-md transition-colors cursor-pointer disabled:cursor-not-allowed"
+                                          title="Move Image Right"
+                                        >
+                                          <ChevronRight className="h-3.5 w-3.5" />
+                                        </button>
+                                      </div>
+                                    </div>
                                   </div>
                                 );
                               })}
