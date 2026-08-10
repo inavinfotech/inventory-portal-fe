@@ -25,6 +25,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Star,
+  Trash2,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
 import { generateProductSku, generateVariantSku, sanitizeSkuInput } from "../utils/skuGenerator";
@@ -48,6 +49,7 @@ const Inventory = () => {
     name: "",
     sku: "",
     price: "",
+    discounted_price: "",
     description: "",
     variants: [],
   });
@@ -344,6 +346,7 @@ const Inventory = () => {
         name: newProduct.name,
         sku: newProduct.sku,
         base_price: parseFloat(newProduct.price),   // ← renamed from price
+        discounted_price: newProduct.discounted_price ? parseFloat(newProduct.discounted_price) : null,
         description: newProduct.description,
         images: imageUrls,
         variant_types: newProduct.variants.length > 0 ? variantTypesFromNiches : [],
@@ -363,6 +366,7 @@ const Inventory = () => {
         name: "",
         sku: "",
         price: "",
+        discounted_price: "",
         description: "",
         variants: [],
       });
@@ -380,6 +384,23 @@ const Inventory = () => {
       );
     } finally {
       setIsUploading(false);
+    }
+  };
+
+  const handleDeleteProduct = async (product) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete "${product.name}" and all its variants, stock, and movement history?\n\nThis action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await inventoryService.deleteProduct(product.id);
+      fetchInventory();
+      window.dispatchEvent(new Event("stock-updated"));
+    } catch (err) {
+      alert(
+        "Failed to delete product: " + (err.response?.data?.detail || err.message),
+      );
     }
   };
 
@@ -459,6 +480,7 @@ const Inventory = () => {
                 name: "",
                 sku: generateProductSku(""),
                 price: "",
+                discounted_price: "",
                 description: "",
                 variants: [],
               });
@@ -624,11 +646,30 @@ const Inventory = () => {
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="font-black text-gray-900">
-                            {product.variants?.length > 0
-                              ? `₹${Math.min(...product.variants.map((v) => v.price)).toFixed(2)} - ₹${Math.max(...product.variants.map((v) => v.price)).toFixed(2)}`
-                              : `₹${(product.base_price ?? product.price ?? 0).toFixed(2)}`}
-                          </span>
+                          <div className="flex flex-col">
+                            {product.variants?.length > 0 ? (
+                              <span className="font-black text-gray-900">
+                                {`₹${Math.min(...product.variants.map((v) => v.price)).toFixed(2)} - ₹${Math.max(...product.variants.map((v) => v.price)).toFixed(2)}`}
+                              </span>
+                            ) : (
+                              <>
+                                {product.discounted_price ? (
+                                  <>
+                                    <span className="font-black text-emerald-700">
+                                      ₹{product.discounted_price.toFixed(2)}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400 line-through font-medium">
+                                      MRP ₹{(product.base_price ?? product.price ?? 0).toFixed(2)}
+                                    </span>
+                                  </>
+                                ) : (
+                                  <span className="font-black text-gray-900">
+                                    {`₹${(product.base_price ?? product.price ?? 0).toFixed(2)}`}
+                                  </span>
+                                )}
+                              </>
+                            )}
+                          </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
@@ -689,6 +730,13 @@ const Inventory = () => {
                               title="View & Download Barcode"
                             >
                               <Barcode className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteProduct(product)}
+                              className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-rose-100"
+                              title="Delete Product"
+                            >
+                              <Trash2 className="h-4 w-4" />
                             </button>
                             <div className="h-6 w-px bg-gray-200 mx-1"></div>
                             <button
@@ -896,22 +944,42 @@ const Inventory = () => {
                   />
                 </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Base Price (₹)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-black text-gray-900"
-                  value={newProduct.price}
-                  onChange={(e) =>
-                    setNewProduct({
-                      ...newProduct,
-                      price: e.target.value,
-                    })
-                  }
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
+                    Price MRP (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-black text-gray-900"
+                    value={newProduct.price}
+                    onChange={(e) =>
+                      setNewProduct({
+                        ...newProduct,
+                        price: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
+                    Discounted Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Optional"
+                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-emerald-500/20 outline-none font-black text-emerald-800"
+                    value={newProduct.discounted_price}
+                    onChange={(e) =>
+                      setNewProduct({
+                        ...newProduct,
+                        discounted_price: e.target.value,
+                      })
+                    }
+                  />
+                </div>
               </div>
 
               {/* Variant Combinations Option */}
@@ -1270,23 +1338,43 @@ const Inventory = () => {
                   />
                 </div>
               </div>
-              <div className="space-y-1">
-                <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
-                  Base Price (₹)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-black text-gray-900"
-                  value={editProduct.base_price ?? editProduct.price ?? ""}
-                  onChange={(e) =>
-                    setEditProduct({
-                      ...editProduct,
-                      base_price: e.target.value,
-                      price: e.target.value,  // keep both in sync for display
-                    })
-                  }
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
+                    Price MRP (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary-500/20 outline-none font-black text-gray-900"
+                    value={editProduct.base_price ?? editProduct.price ?? ""}
+                    onChange={(e) =>
+                      setEditProduct({
+                        ...editProduct,
+                        base_price: e.target.value,
+                        price: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase ml-1">
+                    Discounted Price (₹)
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="Optional"
+                    className="w-full px-4 py-3 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-emerald-500/20 outline-none font-black text-emerald-800"
+                    value={editProduct.discounted_price ?? ""}
+                    onChange={(e) =>
+                      setEditProduct({
+                        ...editProduct,
+                        discounted_price: e.target.value || null,
+                      })
+                    }
+                  />
+                </div>
               </div>
 
               {/* Edit Variant Combinations Section */}

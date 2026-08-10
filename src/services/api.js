@@ -46,6 +46,7 @@ export const inventoryService = {
   addProduct: (data) => api.post("/products/", data),
   createProduct: (data) => api.post("/products/", data),
   updateProduct: (id, data) => api.put(`/products/${id}`, data),
+  deleteProduct: (id) => api.delete(`/products/${id}`),
   updateStock: (id, amount, variantId = null) =>
     api.post(`/inventory/adjust`, {
       product_id: id,

@@ -296,6 +296,22 @@ const ProductDetailPage = () => {
     setAdjustQty("");
   };
 
+  const handleDeleteProduct = async () => {
+    if (!product) return;
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete "${product.name}" and all its variants, stock, and movement history?\n\nThis action cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await inventoryService.deleteProduct(product.id);
+      window.dispatchEvent(new Event("stock-updated"));
+      navigate("/inventory");
+    } catch (err) {
+      alert("Failed to delete product: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50/30">
@@ -374,7 +390,7 @@ const ProductDetailPage = () => {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setBarcodeModal({ sku: product.sku, title: product.name, price: product.base_price ?? product.price })}
+            onClick={() => setBarcodeModal({ sku: product.sku, title: product.name, price: product.discounted_price ?? product.base_price ?? product.price })}
             className="inline-flex items-center gap-2 px-5 py-3 bg-indigo-50 text-indigo-700 border border-indigo-100/80 rounded-2xl text-sm font-bold hover:bg-indigo-100 transition-all shadow-xs"
           >
             <Barcode className="h-4 w-4" /> Barcode
@@ -385,6 +401,13 @@ const ProductDetailPage = () => {
           >
             <History className="h-4 w-4" /> View All Movements
           </Link>
+          <button
+            type="button"
+            onClick={handleDeleteProduct}
+            className="inline-flex items-center gap-2 px-5 py-3 bg-rose-50 text-rose-700 border border-rose-100 rounded-2xl text-sm font-bold hover:bg-rose-100 transition-all shadow-xs"
+          >
+            <Trash2 className="h-4 w-4" /> Delete Product
+          </button>
         </div>
       </div>
 
@@ -417,9 +440,17 @@ const ProductDetailPage = () => {
         />
         <StatCard
           icon={<IndianRupee className="text-indigo-500" />}
-          label="Retail Unit Price"
-          value={`₹${(product.base_price ?? product.price ?? 0).toFixed(2)}`}
-          description="Base listing price"
+          label="Price (MRP) & Offer"
+          value={
+            product.discounted_price
+              ? `₹${product.discounted_price.toFixed(2)}`
+              : `₹${(product.base_price ?? product.price ?? 0).toFixed(2)}`
+          }
+          description={
+            product.discounted_price
+              ? `MRP: ₹${(product.base_price ?? product.price ?? 0).toFixed(2)}`
+              : "Base listing price (MRP)"
+          }
           color="indigo"
         />
       </div>
