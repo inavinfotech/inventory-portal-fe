@@ -161,6 +161,7 @@ const Inventory = () => {
         color: attributes["Color"] || attributes["color"] || "",
         weight: attributes["Weight"] || attributes["weight"] || "",
         sku: generateVariantSku(baseSku, attributes),
+        mrp: basePrice || "0",
         price: basePrice || "0",
         stock: 0,
       };
@@ -352,7 +353,8 @@ const Inventory = () => {
         variant_types: newProduct.variants.length > 0 ? variantTypesFromNiches : [],
         variants: newProduct.variants.map((v) => ({
           sku: v.sku,
-          price: parseFloat(v.price || newProduct.price),
+          price: parseFloat(v.price || newProduct.discounted_price || newProduct.price),
+          mrp: v.mrp ? parseFloat(v.mrp) : parseFloat(newProduct.price),
           initial_stock: parseInt(v.stock || 0),    // ← renamed from stock
           attributes: v.attributes || {},           // ← already a dict from generateDynamicCombinations
           images: v.images || [],
@@ -814,14 +816,21 @@ const Inventory = () => {
 
                                       {/* Price & Stock Badge & Stock Controls */}
                                       <div className="flex flex-wrap items-center gap-6">
-                                        {/* Retail Price Tag */}
+                                        {/* Retail Price Tag & MRP */}
                                         <div>
                                           <span className="block text-[9px] font-black text-gray-400 uppercase tracking-widest">
-                                            Price
+                                            Price (MRP & Retail)
                                           </span>
-                                          <span className="font-black text-xs text-gray-900">
-                                            ₹{typeof v.price === "number" ? v.price.toFixed(2) : parseFloat(v.price || 0).toFixed(2)}
-                                          </span>
+                                          <div className="flex items-baseline gap-1.5">
+                                            <span className="font-black text-xs text-emerald-800">
+                                              ₹{typeof v.price === "number" ? v.price.toFixed(2) : parseFloat(v.price || 0).toFixed(2)}
+                                            </span>
+                                            {v.mrp && parseFloat(v.mrp) > parseFloat(v.price || 0) && (
+                                              <span className="text-[10px] text-gray-400 line-through font-medium">
+                                                MRP ₹{parseFloat(v.mrp).toFixed(2)}
+                                              </span>
+                                            )}
+                                          </div>
                                         </div>
 
                                         {/* Stock Level Display */}
@@ -1137,7 +1146,7 @@ const Inventory = () => {
                           </button>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-2 items-end">
+                        <div className="grid grid-cols-4 gap-2 items-end">
                           <div>
                             <div className="flex items-center justify-between">
                               <label className="text-[9px] font-bold text-gray-400 uppercase">Variant SKU</label>
@@ -1165,11 +1174,27 @@ const Inventory = () => {
                             />
                           </div>
                           <div>
-                            <label className="text-[9px] font-bold text-gray-400 uppercase">Price (₹)</label>
+                            <label className="text-[9px] font-bold text-gray-400 uppercase">Price MRP (₹)</label>
                             <input
                               type="number"
                               step="0.01"
+                              placeholder="MRP"
                               className="w-full px-2 py-1.5 text-xs bg-gray-50 rounded-lg border-none focus:ring-1 focus:ring-primary-500/20 outline-none font-bold"
+                              value={variant.mrp !== undefined ? variant.mrp : ""}
+                              onChange={(e) => {
+                                const v = [...newProduct.variants];
+                                v[idx].mrp = e.target.value;
+                                setNewProduct({ ...newProduct, variants: v });
+                              }}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-[9px] font-bold text-gray-400 uppercase">Retail Price (₹)</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              placeholder="Selling"
+                              className="w-full px-2 py-1.5 text-xs bg-emerald-50 text-emerald-900 rounded-lg border-none focus:ring-1 focus:ring-emerald-500/20 outline-none font-bold"
                               value={variant.price || ""}
                               onChange={(e) => {
                                 const v = [...newProduct.variants];
@@ -1183,7 +1208,7 @@ const Inventory = () => {
                             <input
                               type="number"
                               placeholder="0"
-                              className="w-full px-2 py-1.5 text-xs bg-emerald-50 text-emerald-900 rounded-lg border-none focus:ring-1 focus:ring-emerald-500/20 outline-none font-bold"
+                              className="w-full px-2 py-1.5 text-xs bg-blue-50 text-blue-900 rounded-lg border-none focus:ring-1 focus:ring-blue-500/20 outline-none font-bold"
                               value={variant.stock !== undefined ? variant.stock : ""}
                               onChange={(e) => {
                                 const v = [...newProduct.variants];

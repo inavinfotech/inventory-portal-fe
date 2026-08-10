@@ -88,6 +88,7 @@ const ProductDetailPage = () => {
       if (v.id !== orig.id) return true;
       if (v.sku !== orig.sku) return true;
       if (parseFloat(v.price || 0) !== parseFloat(orig.price || 0)) return true;
+      if (parseFloat(v.mrp || 0) !== parseFloat(orig.mrp || 0)) return true;
       if (parseInt(v.stock || 0) !== parseInt(orig.stock || 0)) return true;
 
       const vAttrs = JSON.stringify(v.attributes || {});
@@ -258,6 +259,7 @@ const ProductDetailPage = () => {
           id: v.id,
           sku: v.sku,
           price: parseFloat(v.price || product.base_price || product.price || 0),
+          mrp: v.mrp ? parseFloat(v.mrp) : (product.base_price ? parseFloat(product.base_price) : null),
           attributes: v.attributes || {},
           stock: parseInt(v.stock || 0),
           images: v.images || [],
@@ -720,10 +722,10 @@ const ProductDetailPage = () => {
                           </div>
                         </div>
 
-                        {/* Body Grid: SKU (4 cols), Price (3 cols), Stock Controls (5 cols) */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-5 items-center">
+                        {/* Body Grid: SKU (3 cols), MRP (2 cols), Retail Price (2 cols), Stock Controls (5 cols) */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4 items-center">
                           {/* SKU Column */}
-                          <div className="lg:col-span-4">
+                          <div className="lg:col-span-3">
                             <div className="flex items-center justify-between mb-1.5">
                               <label className="block text-[10px] font-black text-gray-400 uppercase tracking-wider">
                                 SKU Identity
@@ -781,17 +783,39 @@ const ProductDetailPage = () => {
                             </div>
                           </div>
 
-                          {/* Price Column */}
-                          <div className="lg:col-span-3">
+                          {/* Price MRP Column */}
+                          <div className="lg:col-span-2">
+                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">
+                              Price (MRP) (₹)
+                            </label>
+                            <div className="relative">
+                              <span className="absolute left-2.5 top-2 text-gray-400 font-bold text-xs">₹</span>
+                              <input
+                                type="number"
+                                step="0.01"
+                                placeholder="MRP"
+                                className="w-full pl-6 pr-2 py-2 text-xs bg-gray-50/80 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-primary-500/20 outline-none font-bold text-gray-700"
+                                value={v.mrp || ""}
+                                onChange={(e) => {
+                                  const newMrp = e.target.value;
+                                  setVariants(variants.map((item, i) => i === idx ? { ...item, mrp: newMrp } : item));
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Retail Price Column */}
+                          <div className="lg:col-span-2">
                             <label className="block text-[10px] font-black text-gray-400 uppercase tracking-wider mb-1.5">
                               Retail Price (₹)
                             </label>
                             <div className="relative">
-                              <span className="absolute left-3 top-2 text-gray-400 font-bold">₹</span>
+                              <span className="absolute left-2.5 top-2 text-gray-400 font-bold text-xs">₹</span>
                               <input
                                 type="number"
                                 step="0.01"
-                                className="w-full pl-7 pr-3 py-2 text-xs bg-gray-50/80 border border-gray-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-primary-500/20 outline-none font-black text-gray-900"
+                                placeholder="Selling Price"
+                                className="w-full pl-6 pr-2 py-2 text-xs bg-emerald-50/50 border border-emerald-200/80 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500/20 outline-none font-black text-emerald-900"
                                 value={v.price || ""}
                                 onChange={(e) => {
                                   const newPrice = e.target.value;
