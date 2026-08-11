@@ -432,24 +432,51 @@ const ProductDetailPage = () => {
   return (
     <div className="max-w-7xl mx-auto space-y-8 animate-in fade-in duration-500 pb-12">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="flex items-center gap-5">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-3xl border border-gray-100 shadow-xs">
+        <div className="flex items-center gap-4">
           <button
             onClick={() => navigate("/inventory")}
-            className="w-12 h-12 rounded-2xl bg-white border border-gray-100 flex items-center justify-center text-gray-400 hover:text-gray-900 hover:border-gray-200 transition-all shadow-sm"
+            className="w-11 h-11 rounded-2xl bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-500 hover:text-gray-900 hover:bg-gray-100 transition-all shadow-2xs shrink-0 cursor-pointer"
+            title="Back to Inventory"
           >
             <ArrowLeft className="h-5 w-5" />
           </button>
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-black uppercase rounded-lg tracking-widest border border-gray-200">
-                PROD-{product.id}
+          <div className="space-y-1">
+            {isEditingDetails ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  className="text-xl sm:text-2xl font-black text-gray-900 bg-gray-50 border border-indigo-200 rounded-xl px-3 py-1 focus:ring-2 focus:ring-indigo-500/20 outline-none w-full max-w-md"
+                  value={productDetails.name}
+                  onChange={(e) => setProductDetails({ ...productDetails, name: e.target.value })}
+                  placeholder="Enter Product Name..."
+                />
+              </div>
+            ) : (
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-2xl sm:text-3xl font-black text-gray-900 tracking-tight">
+                  {productDetails.name || product.name}
+                </h1>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingDetails(true)}
+                  className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all cursor-pointer"
+                  title="Edit product name"
+                >
+                  <Edit3 className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 bg-gray-100 text-gray-500 text-[10px] font-mono font-bold rounded-lg border border-gray-200 tracking-wider">
+                PROD-{product.id.slice(0, 8)}...
               </span>
               <button
                 type="button"
                 onClick={(e) => handleCopySku(e, product.sku)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[10px] font-mono font-bold transition-all border border-gray-200 cursor-pointer shadow-2xs"
-                title="Click to copy product SKU ID"
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-[10px] font-mono font-bold transition-all border border-gray-200 cursor-pointer"
+                title="Click to copy SKU ID"
               >
                 {copiedSku === product.sku ? (
                   <>
@@ -464,77 +491,73 @@ const ProductDetailPage = () => {
                 )}
               </button>
             </div>
-
-            {isEditingDetails ? (
-              <div className="flex items-center gap-2 mt-1">
-                <input
-                  type="text"
-                  className="text-2xl sm:text-3xl font-black text-gray-900 bg-white border border-indigo-300 rounded-2xl px-4 py-1.5 focus:ring-2 focus:ring-indigo-500/20 outline-none w-full max-w-lg shadow-xs"
-                  value={productDetails.name}
-                  onChange={(e) => setProductDetails({ ...productDetails, name: e.target.value })}
-                  placeholder="Enter Product Name..."
-                />
-              </div>
-            ) : (
-              <h1 className="text-3xl font-black text-gray-900 tracking-tight flex items-center gap-3">
-                {productDetails.name || product.name}
-                <button
-                  type="button"
-                  onClick={() => setIsEditingDetails(true)}
-                  className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
-                  title="Edit product name and details"
-                >
-                  <Edit3 className="h-4 w-4" />
-                </button>
-              </h1>
-            )}
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => setIsEditingDetails(!isEditingDetails)}
-            className={`inline-flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold transition-all shadow-xs ${
-              isEditingDetails
-                ? "bg-indigo-600 text-white hover:bg-indigo-700"
-                : "bg-white text-gray-700 border border-gray-100 hover:bg-gray-50"
-            }`}
-          >
-            <Edit3 className="h-4 w-4" /> {isEditingDetails ? "Done Editing Info" : "Edit Product Info"}
-          </button>
-
+        {/* Icon-based Action Toolbar */}
+        <div className="flex items-center gap-2 bg-gray-50/80 p-1.5 rounded-2xl border border-gray-100 self-start md:self-auto shadow-2xs">
           {hasChanges && (
             <button
               type="button"
               onClick={handleSaveProduct}
               disabled={isSaving}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl text-sm font-black hover:bg-emerald-700 transition-all shadow-md active:scale-95 animate-in fade-in zoom-in-95 cursor-pointer disabled:opacity-50"
+              className="h-10 px-4 bg-emerald-600 text-white rounded-xl font-black text-xs hover:bg-emerald-700 transition-all shadow-sm active:scale-95 flex items-center gap-1.5 cursor-pointer disabled:opacity-50 animate-in fade-in zoom-in-95"
+              title="Save All Changes"
             >
               {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              Save All Changes
+              <span>Save</span>
             </button>
           )}
 
           <button
             type="button"
-            onClick={() => setBarcodeModal({ sku: product.sku, title: productDetails.name || product.name, price: productDetails.discounted_price ? parseFloat(productDetails.discounted_price) : (productDetails.base_price ? parseFloat(productDetails.base_price) : product.price) })}
-            className="inline-flex items-center gap-2 px-5 py-3 bg-indigo-50 text-indigo-700 border border-indigo-100/80 rounded-2xl text-sm font-bold hover:bg-indigo-100 transition-all shadow-xs"
+            onClick={() => setIsEditingDetails(!isEditingDetails)}
+            className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+              isEditingDetails
+                ? "bg-indigo-600 text-white shadow-xs"
+                : "bg-white text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 border border-gray-200/80 shadow-2xs"
+            }`}
+            title={isEditingDetails ? "Close Edit Info" : "Edit Product Info"}
           >
-            <Barcode className="h-4 w-4" /> Barcode
+            <Edit3 className="h-4 w-4" />
           </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              setBarcodeModal({
+                sku: product.sku,
+                title: productDetails.name || product.name,
+                price: productDetails.discounted_price
+                  ? parseFloat(productDetails.discounted_price)
+                  : productDetails.base_price
+                  ? parseFloat(productDetails.base_price)
+                  : product.price,
+              })
+            }
+            className="w-10 h-10 rounded-xl bg-white text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 border border-gray-200/80 flex items-center justify-center transition-all shadow-2xs cursor-pointer"
+            title="Barcode Generator"
+          >
+            <Barcode className="h-4 w-4" />
+          </button>
+
           <Link
             to="/movements"
-            className="inline-flex items-center gap-2 px-6 py-3 bg-white border border-gray-100 rounded-2xl text-sm font-bold text-gray-700 shadow-sm hover:bg-gray-50 transition-all"
+            className="w-10 h-10 rounded-xl bg-white text-gray-600 hover:text-blue-600 hover:bg-blue-50 border border-gray-200/80 flex items-center justify-center transition-all shadow-2xs cursor-pointer"
+            title="View Stock Movements"
           >
-            <History className="h-4 w-4" /> View All Movements
+            <History className="h-4 w-4" />
           </Link>
+
+          <div className="h-5 w-px bg-gray-200 mx-0.5"></div>
+
           <button
             type="button"
             onClick={handleDeleteProduct}
-            className="inline-flex items-center gap-2 px-5 py-3 bg-rose-50 text-rose-700 border border-rose-100 rounded-2xl text-sm font-bold hover:bg-rose-100 transition-all shadow-xs"
+            className="w-10 h-10 rounded-xl bg-white text-rose-600 hover:bg-rose-50 border border-rose-100 flex items-center justify-center transition-all shadow-2xs cursor-pointer"
+            title="Delete Product"
           >
-            <Trash2 className="h-4 w-4" /> Delete Product
+            <Trash2 className="h-4 w-4" />
           </button>
         </div>
       </div>
