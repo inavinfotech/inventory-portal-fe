@@ -425,9 +425,19 @@ const Inventory = () => {
       const payload = {
         name: updateData.name,
         sku: updateData.sku,
-        base_price: parseFloat(editProduct.base_price || editProduct.price || 0), // ← renamed
+        base_price: parseFloat(editProduct.base_price || editProduct.price || 0),
+        discounted_price: editProduct.discounted_price ? parseFloat(editProduct.discounted_price) : null,
         description: updateData.description,
         images: imageUrls,
+        variants: (editProduct.variants || []).map((v) => ({
+          id: v.id,
+          sku: v.sku,
+          price: parseFloat(v.price || editProduct.base_price || editProduct.price || 0),
+          mrp: v.mrp ? parseFloat(v.mrp) : (editProduct.base_price ? parseFloat(editProduct.base_price) : null),
+          attributes: v.attributes || {},
+          stock: parseInt(v.stock || 0),
+          images: v.images || [],
+        })),
       };
 
       await inventoryService.updateProduct(id, payload);
@@ -720,9 +730,9 @@ const Inventory = () => {
                               </>
                             )}
                             <button
-                              onClick={() => navigate(`/inventory/${product.id}`)}
+                              onClick={() => handleShowEdit(product)}
                               className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors border border-blue-100"
-                              title="Edit Product Details & Variants"
+                              title="Edit Product Details & Cover Image"
                             >
                               <Edit3 className="h-4 w-4" />
                             </button>
@@ -1313,14 +1323,29 @@ const Inventory = () => {
         </div>
       )}
 
-      {/* Edit Product Modal (Removed - product & variants edited on ProductDetailPage) */}
-      {false && (
+      {/* Edit Product Modal */}
+      {showEditModal && editProduct && (
         <div className="fixed inset-0 z-60 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="text-2xl font-black text-gray-900">
-                Edit Product
-              </h3>
+          <div className="bg-white w-full max-w-xl rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-2xl font-black text-gray-900">
+                  Edit Product & Cover Image
+                </h3>
+                <p className="text-xs text-gray-500 font-medium mt-0.5">
+                  Update product name, cover image, pricing, or{" "}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEditModal(false);
+                      navigate(`/inventory/${editProduct.id}`);
+                    }}
+                    className="text-indigo-600 font-bold hover:underline cursor-pointer"
+                  >
+                    open full detail page
+                  </button>
+                </p>
+              </div>
               <button
                 onClick={() => setShowEditModal(false)}
                 className="p-2 text-gray-400 hover:bg-gray-50 rounded-xl transition-colors"

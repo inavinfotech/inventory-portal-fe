@@ -30,6 +30,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Star,
+  Upload,
 } from "lucide-react";
 import { inventoryService } from "../services/api";
 import { generateVariantSku, sanitizeSkuInput } from "../utils/skuGenerator";
@@ -53,8 +54,16 @@ const ProductDetailPage = () => {
     setTimeout(() => setCopiedSku(null), 2000);
   };
 
-  // In-Page Variant Management State
+  // Product Details & In-Page Variant Management State
   const [variants, setVariants] = useState([]);
+  const [productDetails, setProductDetails] = useState({
+    name: "",
+    description: "",
+    base_price: "",
+    discounted_price: "",
+    images: [],
+  });
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showGen, setShowGen] = useState(false);
   const [optionNiches, setOptionNiches] = useState([
@@ -102,6 +111,65 @@ const ProductDetailPage = () => {
 
     return false;
   }, [product, variants]);
+
+  const hasProductDetailsChanges = React.useMemo(() => {
+    if (!product) return false;
+    if ((productDetails.name || "") !== (product.name || "")) return true;
+    if ((productDetails.description || "") !== (product.description || "")) return true;
+    if (parseFloat(productDetails.base_price || 0) !== parseFloat(product.base_price ?? product.price ?? 0)) return true;
+    
+    const pDisc = product.discounted_price === "" || product.discounted_price === null ? null : parseFloat(product.discounted_price);
+    const dDisc = productDetails.discounted_price === "" || productDetails.discounted_price === null ? null : parseFloat(productDetails.discounted_price);
+    if (pDisc !== dDisc) return true;
+
+    if (JSON.stringify(productDetails.images || []) !== JSON.stringify(product.images || [])) return true;
+    return false;
+  }, [product, productDetails]);
+
+  const hasChanges = hasVariantChanges || hasProductDetailsChanges;
+
+  const handleCatalogImageUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+    try {
+      const res = await inventoryService.uploadImages(files);
+      const uploadedUrls = res.data;
+      setProductDetails((prev) => ({
+        ...prev,
+        images: [...(prev.images || []), ...uploadedUrls],
+      }));
+    } catch (err) {
+      alert("Failed to upload catalog image: " + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleRemoveCatalogImage = (imgIdx) => {
+    setProductDetails((prev) => ({
+      ...prev,
+      images: (prev.images || []).filter((_, idx) => idx !== imgIdx),
+    }));
+  };
+
+  const handleMoveCatalogImage = (imgIdx, direction) => {
+    setProductDetails((prev) => {
+      const currentImgs = [...(prev.images || [])];
+      if (currentImgs.length <= 1) return prev;
+
+      if (direction === "left" && imgIdx > 0) {
+        const temp = currentImgs[imgIdx];
+        currentImgs[imgIdx] = currentImgs[imgIdx - 1];
+        currentImgs[imgIdx - 1] = temp;
+      } else if (direction === "right" && imgIdx < currentImgs.length - 1) {
+        const temp = currentImgs[imgIdx];
+        currentImgs[imgIdx] = currentImgs[imgIdx + 1];
+        currentImgs[imgIdx + 1] = temp;
+      } else if (direction === "cover" && imgIdx > 0) {
+        const [selectedImg] = currentImgs.splice(imgIdx, 1);
+        currentImgs.unshift(selectedImg);
+      }
+      return { ...prev, images: currentImgs };
+    });
+  };
 
   const handleVariantImageUpload = async (vIdx, e) => {
     const files = Array.from(e.target.files);
@@ -172,6 +240,13 @@ const ProductDetailPage = () => {
       const res = await inventoryService.getProductById(productId);
       setProduct(res.data);
       setVariants(JSON.parse(JSON.stringify(res.data.variants || [])));
+      setProductDetails({
+        name: res.data.name || "",
+        description: res.data.description || "",
+        base_price: res.data.base_price ?? res.data.price ?? "",
+        discounted_price: res.data.discounted_price ?? "",
+        images: JSON.parse(JSON.stringify(res.data.images || [])),
+      });
       setError(null);
     } catch (err) {
       setError("Failed to load product details: " + (err.response?.data?.detail || err.message));
@@ -246,20 +321,25 @@ const ProductDetailPage = () => {
     });
   };
 
-  const handleSaveVariants = async () => {
+  const handleSaveProduct = async () => {
+    if (!productDetails.name?.trim()) {
+      alert("Product name cannot be empty");
+      return;
+    }
     try {
       setIsSaving(true);
       const payload = {
-        name: product.name,
+        name: productDetails.name.trim(),
         sku: product.sku,
-        base_price: parseFloat(product.base_price ?? product.price ?? 0),
-        description: product.description,
-        images: product.images,
+        base_price: parseFloat(productDetails.base_price || 0),
+        discounted_price: productDetails.discounted_price !== "" && productDetails.discounted_price !== null ? parseFloat(productDetails.discounted_price) : null,
+        description: productDetails.description,
+        images: productDetails.images,
         variants: variants.map((v) => ({
           id: v.id,
           sku: v.sku,
-          price: parseFloat(v.price || product.base_price || product.price || 0),
-          mrp: v.mrp ? parseFloat(v.mrp) : (product.base_price ? parseFloat(product.base_price) : null),
+          price: parseFloat(v.price || productDetails.base_price || product.price || 0),
+          mrp: v.mrp ? parseFloat(v.mrp) : (productDetails.base_price ? parseFloat(productDetails.base_price) : null),
           attributes: v.attributes || {},
           stock: parseInt(v.stock || 0),
           images: v.images || [],
@@ -270,9 +350,9 @@ const ProductDetailPage = () => {
       await fetchProductDetails();
       await fetchProductMovements();
       window.dispatchEvent(new Event("stock-updated"));
-      alert("Variants and stock updated successfully!");
+      alert("Product details and variants saved successfully!");
     } catch (err) {
-      alert("Failed to save variants: " + (err.response?.data?.detail || err.message));
+      alert("Failed to save product: " + (err.response?.data?.detail || err.message));
     } finally {
       setIsSaving(false);
     }
@@ -384,15 +464,61 @@ const ProductDetailPage = () => {
                 )}
               </button>
             </div>
-            <h1 className="text-3xl font-black text-gray-900 tracking-tight">
-              {product.name}
-            </h1>
+
+            {isEditingDetails ? (
+              <div className="flex items-center gap-2 mt-1">
+                <input
+                  type="text"
+                  className="text-2xl sm:text-3xl font-black text-gray-900 bg-white border border-indigo-300 rounded-2xl px-4 py-1.5 focus:ring-2 focus:ring-indigo-500/20 outline-none w-full max-w-lg shadow-xs"
+                  value={productDetails.name}
+                  onChange={(e) => setProductDetails({ ...productDetails, name: e.target.value })}
+                  placeholder="Enter Product Name..."
+                />
+              </div>
+            ) : (
+              <h1 className="text-3xl font-black text-gray-900 tracking-tight flex items-center gap-3">
+                {productDetails.name || product.name}
+                <button
+                  type="button"
+                  onClick={() => setIsEditingDetails(true)}
+                  className="p-1.5 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                  title="Edit product name and details"
+                >
+                  <Edit3 className="h-4 w-4" />
+                </button>
+              </h1>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-3">
+
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={() => setBarcodeModal({ sku: product.sku, title: product.name, price: product.discounted_price ?? product.base_price ?? product.price })}
+            onClick={() => setIsEditingDetails(!isEditingDetails)}
+            className={`inline-flex items-center gap-2 px-5 py-3 rounded-2xl text-sm font-bold transition-all shadow-xs ${
+              isEditingDetails
+                ? "bg-indigo-600 text-white hover:bg-indigo-700"
+                : "bg-white text-gray-700 border border-gray-100 hover:bg-gray-50"
+            }`}
+          >
+            <Edit3 className="h-4 w-4" /> {isEditingDetails ? "Done Editing Info" : "Edit Product Info"}
+          </button>
+
+          {hasChanges && (
+            <button
+              type="button"
+              onClick={handleSaveProduct}
+              disabled={isSaving}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-2xl text-sm font-black hover:bg-emerald-700 transition-all shadow-md active:scale-95 animate-in fade-in zoom-in-95 cursor-pointer disabled:opacity-50"
+            >
+              {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              Save All Changes
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setBarcodeModal({ sku: product.sku, title: productDetails.name || product.name, price: productDetails.discounted_price ? parseFloat(productDetails.discounted_price) : (productDetails.base_price ? parseFloat(productDetails.base_price) : product.price) })}
             className="inline-flex items-center gap-2 px-5 py-3 bg-indigo-50 text-indigo-700 border border-indigo-100/80 rounded-2xl text-sm font-bold hover:bg-indigo-100 transition-all shadow-xs"
           >
             <Barcode className="h-4 w-4" /> Barcode
@@ -444,53 +570,253 @@ const ProductDetailPage = () => {
           icon={<IndianRupee className="text-indigo-500" />}
           label="Price (MRP) & Offer"
           value={
-            product.discounted_price
-              ? `₹${product.discounted_price.toFixed(2)}`
-              : `₹${(product.base_price ?? product.price ?? 0).toFixed(2)}`
+            productDetails.discounted_price && productDetails.discounted_price !== ""
+              ? `₹${parseFloat(productDetails.discounted_price).toFixed(2)}`
+              : `₹${parseFloat(productDetails.base_price || product.price || 0).toFixed(2)}`
           }
           description={
-            product.discounted_price
-              ? `MRP: ₹${(product.base_price ?? product.price ?? 0).toFixed(2)}`
+            productDetails.discounted_price && productDetails.discounted_price !== ""
+              ? `MRP: ₹${parseFloat(productDetails.base_price || product.price || 0).toFixed(2)}`
               : "Base listing price (MRP)"
           }
           color="indigo"
         />
       </div>
 
+      {/* EDIT PRODUCT DETAILS PANEL (Toggled by isEditingDetails) */}
+      {isEditingDetails && (
+        <section className="bg-gradient-to-r from-indigo-50/80 via-white to-indigo-50/40 rounded-3xl border border-indigo-100/80 p-6 md:p-8 shadow-sm space-y-6 animate-in slide-in-from-top-2 duration-300">
+          <div className="flex items-center justify-between border-b border-indigo-100 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold">
+                <Edit3 className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-gray-900">Edit Product Identity & Catalog Metadata</h3>
+                <p className="text-xs text-gray-500 font-medium">Update main product title, base price, offer price, and catalog description</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsEditingDetails(false)}
+              className="p-2 text-gray-400 hover:text-gray-700 hover:bg-white rounded-xl transition-all"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-3 space-y-1.5">
+              <label className="text-xs font-black text-gray-600 uppercase tracking-wider">Product Name</label>
+              <input
+                type="text"
+                className="w-full px-4 py-3 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none font-bold text-gray-900 text-base"
+                value={productDetails.name}
+                onChange={(e) => setProductDetails({ ...productDetails, name: e.target.value })}
+                placeholder="Enter product title..."
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-black text-gray-600 uppercase tracking-wider">Base Price / MRP (₹)</label>
+              <input
+                type="number"
+                step="0.01"
+                className="w-full px-4 py-3 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none font-black text-gray-900"
+                value={productDetails.base_price}
+                onChange={(e) => setProductDetails({ ...productDetails, base_price: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-black text-gray-600 uppercase tracking-wider">Discounted Offer Price (₹)</label>
+              <input
+                type="number"
+                step="0.01"
+                placeholder="Optional offer price"
+                className="w-full px-4 py-3 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 outline-none font-black text-emerald-800"
+                value={productDetails.discounted_price ?? ""}
+                onChange={(e) => setProductDetails({ ...productDetails, discounted_price: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-black text-gray-600 uppercase tracking-wider">SKU Identity</label>
+              <input
+                type="text"
+                disabled
+                readOnly
+                value={product.sku}
+                className="w-full px-4 py-3 bg-gray-100/80 border border-gray-200 rounded-2xl outline-none font-mono text-sm text-gray-500 cursor-not-allowed select-none"
+              />
+            </div>
+
+            <div className="md:col-span-3 space-y-1.5">
+              <label className="text-xs font-black text-gray-600 uppercase tracking-wider">Catalog Description</label>
+              <textarea
+                rows={3}
+                className="w-full px-4 py-3 bg-white border border-gray-200 rounded-2xl focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none font-medium text-gray-700 leading-relaxed custom-scrollbar"
+                value={productDetails.description}
+                onChange={(e) => setProductDetails({ ...productDetails, description: e.target.value })}
+                placeholder="Detailed catalog description, notes, features..."
+              />
+            </div>
+          </div>
+        </section>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Left Column: Product Info & In-Page Variant Management */}
         <div className="lg:col-span-2 space-y-8">
-          {/* Main Product Visual Showcase */}
-          {product.images?.length > 0 && (
-            <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden p-6 space-y-4">
-              <h3 className="text-xs font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
-                <ImageIcon className="h-4 w-4 text-primary-500" /> Catalog Showcase ({product.images.length})
-              </h3>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {product.images.map((imgUrl, idx) => (
+          {/* Main Product Visual Showcase & Cover Image Control */}
+          <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden p-6 md:p-8 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
+              <div>
+                <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
+                  <ImageIcon className="h-4 w-4 text-indigo-600" /> Catalog Showcase & Cover Image ({productDetails.images?.length || 0})
+                </h3>
+                <p className="text-xs text-gray-500 font-medium mt-0.5">
+                  The first image with the star badge serves as the primary Cover Image.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-100 rounded-2xl text-xs font-bold transition-all cursor-pointer shadow-2xs hover:scale-[1.02] active:scale-95 self-start sm:self-auto">
+                <Plus className="h-4 w-4" /> Upload Product Images
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*"
+                  onChange={handleCatalogImageUpload}
+                  className="hidden"
+                />
+              </label>
+            </div>
+
+            {productDetails.images?.length > 0 ? (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                {productDetails.images.map((imgUrl, idx) => (
                   <div
                     key={idx}
-                    onClick={() => setZoomedImage(`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${imgUrl}`)}
-                    className="aspect-square rounded-2xl bg-gray-50 border border-gray-100 overflow-hidden cursor-zoom-in group relative"
+                    className={`aspect-square rounded-2xl bg-gray-50 border overflow-hidden relative group transition-all ${
+                      idx === 0 ? "border-amber-400 ring-2 ring-amber-400/20 shadow-md" : "border-gray-100"
+                    }`}
                   >
                     <img
                       src={`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${imgUrl}`}
                       alt={`Product asset ${idx + 1}`}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     />
+
+                    {/* Cover Image Badge */}
+                    {idx === 0 && (
+                      <span className="absolute top-2.5 left-2.5 px-2 py-0.5 bg-amber-500/95 backdrop-blur-xs text-white font-black text-[9px] uppercase tracking-wider rounded-lg shadow-sm flex items-center gap-1 z-10">
+                        <Star className="h-3 w-3 fill-current" /> Cover Image
+                      </span>
+                    )}
+
+                    {/* Control Overlay */}
+                    <div className="absolute inset-0 bg-gray-900/60 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2.5 z-20">
+                      <div className="flex items-center justify-between">
+                        {idx > 0 ? (
+                          <button
+                            type="button"
+                            onClick={() => handleMoveCatalogImage(idx, "cover")}
+                            className="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 shadow-xs cursor-pointer"
+                            title="Set as Cover Image"
+                          >
+                            <Star className="h-3 w-3 fill-current" /> Set Cover
+                          </button>
+                        ) : (
+                          <span />
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveCatalogImage(idx)}
+                          className="p-1.5 bg-rose-500/90 hover:bg-rose-600 text-white rounded-lg transition-colors shadow-xs ml-auto cursor-pointer"
+                          title="Remove image"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-1">
+                        <div className="flex items-center gap-1">
+                          {idx > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => handleMoveCatalogImage(idx, "left")}
+                              className="p-1.5 bg-white/90 hover:bg-white text-gray-800 rounded-lg shadow-xs transition-all cursor-pointer"
+                              title="Move Left"
+                            >
+                              <ChevronLeft className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                          {idx < productDetails.images.length - 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleMoveCatalogImage(idx, "right")}
+                              className="p-1.5 bg-white/90 hover:bg-white text-gray-800 rounded-lg shadow-xs transition-all cursor-pointer"
+                              title="Move Right"
+                            >
+                              <ChevronRight className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setZoomedImage(`${import.meta.env.VITE_API_URL.replace("/api/v1", "")}${imgUrl}`)}
+                          className="p-1.5 bg-white/90 hover:bg-white text-gray-800 rounded-lg shadow-xs transition-all cursor-pointer"
+                          title="Zoom view"
+                        >
+                          <ImageIcon className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
-            </section>
-          )}
+            ) : (
+              <div className="border-2 border-dashed border-gray-200 rounded-2xl p-8 text-center bg-gray-50/50 space-y-3">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500 mx-auto">
+                  <ImageIcon className="h-6 w-6" />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-gray-900">No Catalog Images Uploaded</p>
+                  <p className="text-xs text-gray-500 font-medium">Upload showcase photos. The first image will automatically be set as the Cover Image.</p>
+                </div>
+                <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white hover:bg-indigo-700 rounded-2xl text-xs font-bold transition-all cursor-pointer shadow-md">
+                  <Upload className="h-4 w-4" /> Upload Cover Image
+                  <input
+                    type="file"
+                    multiple
+                    accept="image/*"
+                    onChange={handleCatalogImageUpload}
+                    className="hidden"
+                  />
+                </label>
+              </div>
+            )}
+          </section>
 
-          {/* Catalog Description */}
+          {/* Catalog Description Section */}
           <section className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden p-8">
-            <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <Info className="h-4 w-4 text-primary-500" /> Catalog Description
-            </h3>
-            <p className="text-gray-600 leading-relaxed italic border-l-4 border-gray-100 pl-6">
-              {product.description || "No description provided for this catalog item."}
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-black text-gray-900 uppercase tracking-widest flex items-center gap-2">
+                <Info className="h-4 w-4 text-indigo-600" /> Catalog Description
+              </h3>
+              {!isEditingDetails && (
+                <button
+                  type="button"
+                  onClick={() => setIsEditingDetails(true)}
+                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                >
+                  <Edit3 className="h-3.5 w-3.5" /> Edit Description
+                </button>
+              )}
+            </div>
+            <p className="text-gray-600 leading-relaxed italic border-l-4 border-indigo-100 pl-6">
+              {productDetails.description || "No description provided for this catalog item."}
             </p>
           </section>
 
@@ -529,7 +855,7 @@ const ProductDetailPage = () => {
                       {
                         attributes: {},
                         sku: generateVariantSku(product.sku, {}),
-                        price: product.base_price || product.price || 0,
+                        price: productDetails.base_price || product.price || 0,
                         stock: 0,
                       },
                     ])
@@ -538,10 +864,10 @@ const ProductDetailPage = () => {
                 >
                   <Plus className="h-4 w-4 text-gray-500" /> Add Variant
                 </button>
-                {hasVariantChanges && (
+                {hasChanges && (
                   <button
                     type="button"
-                    onClick={handleSaveVariants}
+                    onClick={handleSaveProduct}
                     disabled={isSaving}
                     className="px-6 py-2.5 bg-gray-900 text-white hover:bg-black rounded-2xl text-xs font-black transition-all flex items-center gap-2 shadow-md hover:shadow-lg disabled:opacity-50 hover:scale-[1.02] active:scale-95 cursor-pointer sm:ml-auto animate-in fade-in zoom-in-95 duration-200"
                   >
@@ -550,7 +876,7 @@ const ProductDetailPage = () => {
                     ) : (
                       <Save className="h-4 w-4" />
                     )}
-                    Save Variants
+                    Save All Changes
                   </button>
                 )}
               </div>
