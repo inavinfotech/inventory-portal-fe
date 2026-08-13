@@ -24,6 +24,8 @@ import {
   Save,
   ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Star,
   Trash2,
 } from "lucide-react";
@@ -37,6 +39,9 @@ const Inventory = () => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [totalProducts, setTotalProducts] = useState(0);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
@@ -168,23 +173,72 @@ const Inventory = () => {
     });
   };
 
-  useEffect(() => {
-    fetchInventory();
-  }, []);
+  const getPageNumbers = (current, totalPages) => {
+    if (!totalPages || totalPages <= 1) return [1];
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    if (current <= 4) {
+      return [1, 2, 3, 4, 5, "...", totalPages];
+    }
+    if (current >= totalPages - 3) {
+      return [1, "...", totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+    }
+    return [1, "...", current - 1, current, current + 1, "...", totalPages];
+  };
 
-  const fetchInventory = async () => {
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fetchInventory(currentPage, itemsPerPage, searchTerm);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [currentPage, itemsPerPage, searchTerm]);
+
+  const fetchInventory = async (page = currentPage, limit = itemsPerPage, search = searchTerm) => {
     try {
       setLoading(true);
-      const response = await inventoryService.getProducts();
+      const offset = (page - 1) * limit;
+      const response = await inventoryService.getProducts(limit, offset, search);
       const items = response.data.items || [];
+      const total = response.data.total ?? items.length;
       setProducts(JSON.parse(JSON.stringify(items)));
       setOriginalProducts(JSON.parse(JSON.stringify(items)));
+      setTotalProducts(total);
       setError(null);
     } catch (err) {
       setError("Failed to fetch inventory. Please try again later.");
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePageChange = (newPage) => {
+    if (newPage === currentPage) return;
+    if (hasPendingStockChanges) {
+      if (
+        !window.confirm(
+          "You have unsaved stock changes. Are you sure you want to change pages? Draft changes may be discarded."
+        )
+      ) {
+        return;
+      }
+    }
+    setCurrentPage(newPage);
+  };
+
+  const handleItemsPerPageChange = (newLimit) => {
+    if (newLimit === itemsPerPage) return;
+    if (hasPendingStockChanges) {
+      if (
+        !window.confirm(
+          "You have unsaved stock changes. Are you sure you want to change rows per page? Draft changes may be discarded."
+        )
+      ) {
+        return;
+      }
+    }
+    setItemsPerPage(newLimit);
+    setCurrentPage(1);
   };
 
   const handleShowEdit = (product) => {
@@ -556,7 +610,10 @@ const Inventory = () => {
             placeholder="Search products by SKU, name or location..."
             className="w-full rounded-xl bg-gray-50 border-none pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-primary-500/20 outline-none transition-all"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1);
+            }}
           />
         </div>
       </div>
@@ -580,17 +637,11 @@ const Inventory = () => {
                     colSpan="4"
                     className="px-6 py-12 text-center text-gray-400 italic font-medium"
                   >
-                    No products registered in the warehouse.
+                    {searchTerm ? "No products match your search." : "No products registered in the warehouse."}
                   </td>
                 </tr>
               ) : (
-                products
-                  .filter(
-                    (p) =>
-                      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      p.sku.toLowerCase().includes(searchTerm.toLowerCase()),
-                  )
-                  .map((product) => (
+                products.map((product) => (
                     <React.Fragment key={product.id}>
                       <tr className="group hover:bg-gray-50/50 transition-colors">
                         <td className="px-6 py-4">
@@ -906,6 +957,99 @@ const Inventory = () => {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Pagination Footer */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 px-6 py-4 bg-white border-t border-gray-100">
+          {/* Item Range Info */}
+          <div className="text-xs font-semibold text-gray-500">
+            Showing{" "}
+            <span className="font-bold text-gray-900">
+              {totalProducts === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1}
+            </span>{" "}
+            to{" "}
+            <span className="font-bold text-gray-900">
+              {Math.min(currentPage * itemsPerPage, totalProducts)}
+            </span>{" "}
+            of <span className="font-bold text-gray-900">{totalProducts}</span> products
+          </div>
+
+          <div className="flex flex-wrap items-center gap-4 sm:gap-6">
+            {/* Items Per Page Selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 font-medium">Rows per page:</span>
+              <select
+                value={itemsPerPage}
+                onChange={(e) => handleItemsPerPageChange(Number(e.target.value))}
+                className="bg-gray-50 border border-gray-200 text-gray-800 text-xs font-semibold rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500/20 cursor-pointer"
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
+            </div>
+
+            {/* Page Buttons */}
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => handlePageChange(1)}
+                disabled={currentPage <= 1 || loading}
+                className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
+                title="First Page"
+              >
+                <ChevronsLeft className="h-4 w-4" />
+              </button>
+
+              <button
+                onClick={() => handlePageChange(currentPage - 1)}
+                disabled={currentPage <= 1 || loading}
+                className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
+                title="Previous Page"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+
+              {getPageNumbers(currentPage, Math.ceil(totalProducts / itemsPerPage) || 1).map((pg, idx) => (
+                pg === '...' ? (
+                  <span key={`ellipsis-${idx}`} className="px-2 text-xs text-gray-400 font-medium">
+                    ...
+                  </span>
+                ) : (
+                  <button
+                    key={pg}
+                    onClick={() => handlePageChange(pg)}
+                    disabled={loading}
+                    className={`min-w-[32px] h-8 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                      currentPage === pg
+                        ? "bg-gray-900 text-white shadow-sm"
+                        : "text-gray-600 hover:bg-gray-100"
+                    }`}
+                  >
+                    {pg}
+                  </button>
+                )
+              ))}
+
+              <button
+                onClick={() => handlePageChange(currentPage + 1)}
+                disabled={currentPage >= Math.ceil(totalProducts / itemsPerPage) || loading}
+                className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
+                title="Next Page"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+
+              <button
+                onClick={() => handlePageChange(Math.ceil(totalProducts / itemsPerPage))}
+                disabled={currentPage >= Math.ceil(totalProducts / itemsPerPage) || loading}
+                className="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer disabled:cursor-not-allowed"
+                title="Last Page"
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -31,8 +31,13 @@ api.interceptors.response.use(
 );
 
 export const inventoryService = {
-  getProducts: (limit = 10, offset = 0) =>
-    api.get(`/products/?limit=${limit}&offset=${offset}`),
+  getProducts: (limit = 10, offset = 0, search = "") => {
+    const params = { limit, offset };
+    if (search && search.trim()) {
+      params.search = search.trim();
+    }
+    return api.get("/products/", { params });
+  },
   getProduct: (id) => api.get(`/products/${id}`),
   getProductById: (id) => api.get(`/products/${id}`),
   getProductStock: (id) => api.get(`/inventory/${id}`),
