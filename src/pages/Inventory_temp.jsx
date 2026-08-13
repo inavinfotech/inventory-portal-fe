@@ -42,6 +42,8 @@ const Inventory = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
   const [totalProducts, setTotalProducts] = useState(0);
+  const [toast, setToast] = useState(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAdjustmentModal, setShowAdjustmentModal] = useState(false);
@@ -67,6 +69,13 @@ const Inventory = () => {
   const [copiedSku, setCopiedSku] = useState(null);
   const [originalProducts, setOriginalProducts] = useState([]);
   const [isSavingStock, setIsSavingStock] = useState(false);
+
+  const showNotification = (message, type = "error") => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast((prev) => (prev?.message === message ? null : prev));
+    }, 4500);
+  };
 
   const hasPendingStockChanges = React.useMemo(() => {
     if (!originalProducts.length || !products.length) return false;
@@ -215,13 +224,7 @@ const Inventory = () => {
   const handlePageChange = (newPage) => {
     if (newPage === currentPage) return;
     if (hasPendingStockChanges) {
-      if (
-        !window.confirm(
-          "You have unsaved stock changes. Are you sure you want to change pages? Draft changes may be discarded."
-        )
-      ) {
-        return;
-      }
+      showNotification("You have unsaved stock modifications in draft. Click Save Stock Changes to persist.", "error");
     }
     setCurrentPage(newPage);
   };
@@ -229,15 +232,11 @@ const Inventory = () => {
   const handleItemsPerPageChange = (newLimit) => {
     if (newLimit === itemsPerPage) return;
     if (hasPendingStockChanges) {
-      if (
-        !window.confirm(
-          "You have unsaved stock changes. Are you sure you want to change rows per page? Draft changes may be discarded."
-        )
-      ) {
-        return;
-      }
+      showNotification("You have unsaved stock modifications in draft. Click Save Stock Changes to persist.", "error");
     }
     setItemsPerPage(newLimit);
+    setCurrentPage(1);
+  };
     setCurrentPage(1);
   };
 
@@ -307,7 +306,7 @@ const Inventory = () => {
   const handleManualAdjustment = () => {
     const amount = parseInt(adjustmentAmount);
     if (isNaN(amount) || amount < 0) {
-      alert("Please enter a valid stock quantity");
+      showNotification("Please enter a valid stock quantity", "error");
       return;
     }
 
@@ -322,6 +321,7 @@ const Inventory = () => {
     setSelectedProduct(null);
     setSelectedVariant(null);
     setAdjustmentAmount("");
+    showNotification("Stock quantity updated in draft. Click 'Save Stock Changes' to persist to database.", "success");
   };
 
   const handleSaveAllStockChanges = async () => {
@@ -366,9 +366,9 @@ const Inventory = () => {
 
       await fetchInventory();
       window.dispatchEvent(new Event("stock-updated"));
-      alert("All inventory stock changes saved successfully!");
+      showNotification("All inventory stock changes saved successfully!", "success");
     } catch (err) {
-      alert("Failed to save stock changes: " + (err.response?.data?.detail || err.message));
+      showNotification("Failed to save stock changes: " + (err.response?.data?.detail || err.message), "error");
     } finally {
       setIsSavingStock(false);
     }
@@ -376,19 +376,19 @@ const Inventory = () => {
 
   const handleAddProduct = async () => {
     if (!newProduct.name || !newProduct.sku || !newProduct.price) {
-      alert("Please fill in all required fields (Name, SKU, Base Price)");
+      showNotification("Please fill in all required fields (Name, SKU, Base Price)", "error");
       return;
     }
 
     if (!isSkuValid(newProduct.sku)) {
-      alert("Invalid Product SKU ID. The SKU must strictly conform to the configured format rule set (e.g. 16 numeric digits).");
+      showNotification("Invalid Product SKU ID. The SKU must strictly conform to configured format rules.", "error");
       return;
     }
 
     if (newProduct.variants && newProduct.variants.length > 0) {
       for (let i = 0; i < newProduct.variants.length; i++) {
         if (!isSkuValid(newProduct.variants[i].sku)) {
-          alert(`Variant #${i + 1} has an invalid SKU ID (${newProduct.variants[i].sku}). Must strictly conform to configured format rules.`);
+          showNotification(`Variant #${i + 1} has an invalid SKU ID (${newProduct.variants[i].sku}). Must conform to rules.`, "error");
           return;
         }
       }
@@ -403,7 +403,6 @@ const Inventory = () => {
         imageUrls = uploadRes.data;
       }
 
-      // Build variant_types from the niches that were used (if any variants exist)
       const variantTypesFromNiches = addOptionNiches
         .map((n) => ({
           name: n.name.trim(),
@@ -414,7 +413,7 @@ const Inventory = () => {
       const productPayload = {
         name: newProduct.name,
         sku: newProduct.sku,
-        base_price: parseFloat(newProduct.price),   // ← renamed from price
+        base_price: parseFloat(newProduct.price),
         discounted_price: newProduct.discounted_price ? parseFloat(newProduct.discounted_price) : null,
         description: newProduct.description,
         images: imageUrls,
@@ -423,8 +422,8 @@ const Inventory = () => {
           sku: v.sku,
           price: parseFloat(v.price || newProduct.discounted_price || newProduct.price),
           mrp: v.mrp ? parseFloat(v.mrp) : parseFloat(newProduct.price),
-          initial_stock: parseInt(v.stock || 0),    // ← renamed from stock
-          attributes: v.attributes || {},           // ← already a dict from generateDynamicCombinations
+          initial_stock: parseInt(v.stock || 0),
+          attributes: v.attributes || {},
           images: v.images || [],
         })),
       };
@@ -446,49 +445,50 @@ const Inventory = () => {
         { name: "Size", values: "Small, Medium, Large" },
         { name: "Color", values: "Red, Green, Blue" },
       ]);
+      showNotification("Product listed successfully!", "success");
       fetchInventory();
       window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
-      alert(
-        "Failed to add product: " + (err.response?.data?.detail || err.message),
-      );
+      showNotification("Failed to add product: " + (err.response?.data?.detail || err.message), "error");
     } finally {
       setIsUploading(false);
     }
   };
 
   const handleDeleteProduct = async (product) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to permanently delete "${product.name}" and all its variants, stock, and movement history?\n\nThis action cannot be undone.`
-    );
-    if (!confirmed) return;
+    if (deleteConfirmId !== product.id) {
+      setDeleteConfirmId(product.id);
+      showNotification(`Click Delete again on "${product.name}" to confirm permanent deletion.`, "error");
+      setTimeout(() => setDeleteConfirmId(null), 5000);
+      return;
+    }
 
+    setDeleteConfirmId(null);
     try {
       await inventoryService.deleteProduct(product.id);
+      showNotification(`Product "${product.name}" was permanently deleted.`, "success");
       fetchInventory();
       window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
-      alert(
-        "Failed to delete product: " + (err.response?.data?.detail || err.message),
-      );
+      showNotification("Failed to delete product: " + (err.response?.data?.detail || err.message), "error");
     }
   };
 
   const handleUpdateProduct = async () => {
     if (!editProduct.name || !editProduct.sku) {
-      alert("Please fill in all required fields");
+      showNotification("Please fill in all required fields", "error");
       return;
     }
 
     if (!isSkuValid(editProduct.sku)) {
-      alert("Invalid Product SKU ID. Must strictly conform to configured format rules.");
+      showNotification("Invalid Product SKU ID. Must strictly conform to configured format rules.", "error");
       return;
     }
 
     if (editProduct.variants && editProduct.variants.length > 0) {
       for (let i = 0; i < editProduct.variants.length; i++) {
         if (!isSkuValid(editProduct.variants[i].sku)) {
-          alert(`Variant #${i + 1} has an invalid SKU ID (${editProduct.variants[i].sku}).`);
+          showNotification(`Variant #${i + 1} has an invalid SKU ID (${editProduct.variants[i].sku}).`, "error");
           return;
         }
       }
@@ -528,13 +528,11 @@ const Inventory = () => {
       setEditProduct(null);
       setSelectedFiles([]);
       setShowGenEdit(false);
+      showNotification("Product updated successfully!", "success");
       fetchInventory();
       window.dispatchEvent(new Event("stock-updated"));
     } catch (err) {
-      alert(
-        "Failed to update product: " +
-          (err.response?.data?.detail || err.message),
-      );
+      showNotification("Failed to update product: " + (err.response?.data?.detail || err.message), "error");
     } finally {
       setIsUploading(false);
     }
@@ -570,22 +568,55 @@ const Inventory = () => {
         <div className="flex items-center gap-3">
           <button
             onClick={() => {
-              setNewProduct({
-                name: "",
-                sku: generateProductSku(""),
-                price: "",
-                discounted_price: "",
-                description: "",
-                variants: [],
-              });
-              setShowAddModal(true);
+              if (showAddModal) {
+                setShowAddModal(false);
+              } else {
+                setNewProduct({
+                  name: "",
+                  sku: generateProductSku(""),
+                  price: "",
+                  discounted_price: "",
+                  description: "",
+                  variants: [],
+                });
+                setShowEditModal(false);
+                setShowAdjustmentModal(false);
+                setShowAddModal(true);
+              }
             }}
-            className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-black shadow-lg shadow-gray-900/10 transition-all active:scale-95"
+            className="inline-flex items-center gap-2 rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-black shadow-lg shadow-gray-900/10 transition-all active:scale-95 cursor-pointer"
           >
-            <Plus className="h-4 w-4" /> Add Product
+            {showAddModal ? <X className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            {showAddModal ? "Close Form" : "Add Product"}
           </button>
         </div>
       </div>
+
+      {/* Toast Notification Banner */}
+      {toast && (
+        <div
+          className={`p-4 rounded-2xl border flex items-center justify-between gap-3 animate-in slide-in-from-top-2 duration-300 ${
+            toast.type === "error"
+              ? "bg-rose-50 border-rose-200 text-rose-800"
+              : "bg-emerald-50 border-emerald-200 text-emerald-800"
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            {toast.type === "error" ? (
+              <AlertTriangle className="h-5 w-5 text-rose-600 shrink-0" />
+            ) : (
+              <Check className="h-5 w-5 text-emerald-600 shrink-0" />
+            )}
+            <span className="text-xs font-bold">{toast.message}</span>
+          </div>
+          <button
+            onClick={() => setToast(null)}
+            className="p-1 rounded-lg hover:bg-black/5 transition-colors cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
 
       {hasPendingStockChanges && (
         <div className="bg-indigo-900 text-white p-4 rounded-2xl shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in slide-in-from-top-4 duration-200 border border-indigo-700">
@@ -1081,10 +1112,9 @@ const Inventory = () => {
         </div>
       </div>
 
-      {/* Add Product Modal */}
+      {/* Add Product Section (Inline Card) */}
       {showAddModal && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-lg rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
+        <div className="bg-white w-full rounded-3xl p-6 md:p-8 shadow-sm border border-gray-200 animate-in slide-in-from-top-4 duration-300">
             <div className="flex items-center justify-between mb-8">
               <h3 className="text-2xl font-black text-gray-900">
                 New Product Listing
@@ -1289,7 +1319,7 @@ const Inventory = () => {
                           });
                           setShowGenAdd(false);
                         } else {
-                          alert("Please specify option names and values (comma separated) to generate combinations.");
+                          showNotification("Please specify option names and values (comma separated) to generate combinations.", "error");
                         }
                       }}
                       className="w-full py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
@@ -1492,13 +1522,11 @@ const Inventory = () => {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Edit Product Modal */}
+      {/* Edit Product Section (Inline Card) */}
       {showEditModal && editProduct && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-xl rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto custom-scrollbar">
+        <div className="bg-white w-full rounded-3xl p-6 md:p-8 shadow-sm border border-indigo-200 animate-in slide-in-from-top-4 duration-300">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-2xl font-black text-gray-900">
@@ -1715,7 +1743,7 @@ const Inventory = () => {
                           });
                           setShowGenEdit(false);
                         } else {
-                          alert("Please specify option names and values (comma separated) to generate combinations.");
+                          showNotification("Please specify option names and values (comma separated) to generate combinations.", "error");
                         }
                       }}
                       className="w-full py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
@@ -1970,103 +1998,3 @@ const Inventory = () => {
                       }}
                     />
                   </label>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex gap-3 mt-10">
-              <button
-                onClick={() => setShowEditModal(false)}
-                className="flex-1 py-4 text-gray-400 font-bold hover:text-gray-600 transition-colors"
-              >
-                Discard
-              </button>
-              <button
-                onClick={handleUpdateProduct}
-                disabled={isUploading}
-                className="flex-1 py-4 bg-gray-900 text-white rounded-2xl font-black shadow-xl shadow-gray-900/10 hover:bg-black transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {isUploading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> Updating...
-                  </>
-                ) : (
-                  "Update Product"
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Manual Adjustment Modal */}
-      {showAdjustmentModal && selectedProduct && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white w-full max-w-sm rounded-3xl p-8 shadow-2xl animate-in zoom-in-95 duration-200">
-            <h3 className="text-xl font-black text-gray-900 mb-2">
-              {selectedVariant
-                ? `Adjust Variant: ${formatVariantTitle(selectedVariant)}`
-                : "Manual Adjustment"}
-            </h3>
-            <p className="text-xs text-gray-500 mb-6 font-medium">
-              Update the current stock level for
-              <span className="font-bold text-gray-900 mx-1">
-                {selectedVariant ? selectedVariant.sku : selectedProduct.sku}
-              </span>
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                  New Total Quantity
-                </label>
-                <input
-                  type="number"
-                  placeholder="e.g. 100"
-                  className="w-full mt-2 px-6 py-4 bg-gray-50 border-none rounded-2xl font-black text-xl focus:ring-2 focus:ring-primary-500/20 outline-none"
-                  value={adjustmentAmount}
-                  onChange={(e) => setAdjustmentAmount(e.target.value)}
-                  autoFocus
-                />
-              </div>
-
-              <div className="flex gap-3 pt-4">
-                <button
-                  onClick={() => setShowAdjustmentModal(false)}
-                  className="flex-1 py-4 text-gray-400 font-bold hover:bg-gray-50 rounded-2xl transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleManualAdjustment}
-                  className="flex-1 py-4 bg-primary-600 text-white rounded-2xl font-black shadow-lg shadow-primary-500/30 hover:bg-primary-700 transition-all active:scale-95"
-                >
-                  Apply
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* BARCODE MODAL */}
-      {barcodeModal ? (
-        <BarcodeModal
-          sku={barcodeModal.sku}
-          title={barcodeModal.title}
-          price={barcodeModal.price}
-          onClose={() => setBarcodeModal(null)}
-        />
-      ) : (
-        <BarcodeModal
-          isOpen={barcodeModalOpen}
-          onClose={() => setBarcodeModalOpen(false)}
-          sku={barcodeSku}
-          productName={barcodeName}
-        />
-      )}
-    </div>
-  );
-};
-
-export default Inventory;
